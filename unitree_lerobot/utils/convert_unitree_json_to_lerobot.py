@@ -25,8 +25,8 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Literal, List, Dict, Optional
 
-from lerobot.common.constants import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.constants import HF_LEROBOT_HOME
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from unitree_lerobot.utils.constants import ROBOT_CONFIGS
 
@@ -289,13 +289,12 @@ def populate_dataset(
             frame = {
                 "observation.state": state[i],
                 "action": action[i],
-                "task": task
             }
 
             for camera, img_array in cameras.items():
                 frame[f"observation.images.{camera}"] = img_array[i]
 
-            dataset.add_frame(frame)
+            dataset.add_frame(frame, task=task)
 
         dataset.save_episode()
 

@@ -15,7 +15,7 @@ import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
 class LeRobotDataProcessor:

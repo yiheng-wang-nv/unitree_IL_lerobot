@@ -1,7 +1,7 @@
 ''''
 Refer to:   lerobot/lerobot/scripts/eval.py
             lerobot/lerobot/scripts/econtrol_robot.py
-            lerobot/common/robot_devices/control_utils.py
+            lerobot/robot_devices/control_utils.py
 '''
 
 import time
@@ -16,14 +16,14 @@ from torch import nn
 from contextlib import nullcontext
 from multiprocessing import shared_memory, Array, Lock
 
-from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.utils import get_device_from_parameters
-from lerobot.common.utils.utils import (
+from lerobot.policies.factory import make_policy
+from lerobot.policies.utils import get_device_from_parameters
+from lerobot.utils.utils import (
     get_safe_torch_device,
     init_logging,
 )
 from lerobot.configs import parser
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from unitree_lerobot.eval_robot.eval_g1.image_server.image_client import ImageClient
 from unitree_lerobot.eval_robot.eval_g1.robot_control.robot_arm import G1_29_ArmController
@@ -31,7 +31,6 @@ from unitree_lerobot.eval_robot.eval_g1.robot_control.robot_hand_unitree import 
 from unitree_lerobot.eval_robot.eval_g1.eval_real_config import EvalRealConfig
 
 
-# copy from lerobot.common.robot_devices.control_utils import predict_action
 def predict_action(observation, policy, device, use_amp):
     observation = copy(observation)
     with (

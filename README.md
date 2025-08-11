@@ -59,7 +59,7 @@ If you want to directly load the dataset we have already recorded,
 Load the [`unitreerobotics/G1_ToastedBread_Dataset`](https://huggingface.co/datasets/unitreerobotics/G1_ToastedBread_Dataset) dataset from Hugging Face. The default download location is `~/.cache/huggingface/lerobot/unitreerobotics`. If you want to load data from a local source, please change the `root` parameter.
 
 ```python
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import tqdm
 
 episode_index = 1
@@ -77,7 +77,7 @@ for step_idx in tqdm.tqdm(range(from_idx, to_idx)):
 ```bash
 cd unitree_lerobot/lerobot
 
-python lerobot/scripts/visualize_dataset.py \
+python src/lerobot/scripts/visualize_dataset.py \
     --repo-id unitreerobotics/G1_ToastedBread_Dataset \
     --episode-index 0
 ```
@@ -139,8 +139,9 @@ python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
 ```bash
 cd unitree_lerobot/lerobot
 
-python lerobot/scripts/train.py \
+python src/lerobot/scripts/train.py \
     --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --policy.push_to_hub=false \
     --policy.type=act 
 ```
 
@@ -149,9 +150,10 @@ python lerobot/scripts/train.py \
 ```bash
 cd unitree_lerobot/lerobot
 
-python lerobot/scripts/train.py \
-  --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
-  --policy.type=diffusion
+python src/lerobot/scripts/train.py \
+    --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --policy.push_to_hub=false \
+    --policy.type=diffusion
 ```
 
 - `Train Pi0 Policy`
@@ -159,9 +161,10 @@ python lerobot/scripts/train.py \
 ```bash
 cd unitree_lerobot/lerobot
 
-python lerobot/scripts/train.py \
-  --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
-  --policy.type=pi0
+python src/lerobot/scripts/train.py \
+    --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --policy.push_to_hub=false \
+    --policy.type=pi0
 ```
 
 # 4. 🤖 Real-World Testing
