@@ -14,7 +14,7 @@ This repository is used for `lerobot training validation`(Supports LeRobot datas
 
 | Directory          | Description                                                                                                                |
 | ------------- | ------------------------------------------------------------------------------------------------------------------- |
-| lerobot       | The code in the `lerobot repository` for training;  its corresponding commit version number is `725b446a`.|
+| lerobot       | The code in the `lerobot repository` for training;  its corresponding commit version number is `0878c68`.|
 | utils         | `unitree data processing tool `   |
 | eval_robot    | `unitree real machine inference verification of the model`     |
 
