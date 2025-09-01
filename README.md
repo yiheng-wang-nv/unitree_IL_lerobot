@@ -35,6 +35,7 @@ git submodule update --init --recursive
 # Create a conda environment
 conda create -y -n unitree_lerobot python=3.10
 conda activate unitree_lerobot
+conda install pinocchio -c conda-forge
 
 # Install LeRobot
 cd unitree_lerobot/lerobot && pip install -e .
@@ -119,7 +120,7 @@ Convert `Unitree JSON` Dataset to `LeRobot` Format. You can define your own `rob
 # --raw-dir     Corresponds to the directory of your JSON dataset
 # --repo-id     Your unique repo ID on Hugging Face Hub
 # --push_to_hub Whether or not to upload the dataset to Hugging Face Hub (true or false)
-# --robot_type  The type of the robot used in the dataset (e.g., Unitree_G1_Dex3, Unitree_Z1_Dual, Unitree_G1_Dex3)
+# --robot_type  The type of the robot used in the dataset (e.g., Unitree_Z1_Single, Unitree_Z1_Dual, Unitree_G1_Dex1, Unitree_G1_Dex3, Unitree_G1_Brainco, Unitree_G1_Inspire) 
 
 python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
     --raw-dir $HOME/datasets \
@@ -169,24 +170,75 @@ python src/lerobot/scripts/train.py \
 
 # 4. 🤖 Real-World Testing
 
-To test your trained model on a real robot, you can use the eval_g1.py script located in the eval_robot/eval_g1 folder. Here’s how to run it:
+To test your trained model on a real robot, you can use the eval_g1.py script located in the eval_robot folder. Here’s how to run it:
 
 [To open the image_server, follow these steps](https://github.com/unitreerobotics/avp_teleoperate?tab=readme-ov-file#31-%EF%B8%8F-image-server)
 
 ```bash
-# --policy.path Path to the trained model checkpoint
-# --repo_id     Dataset repository ID (Why use it? The first frame state of the dataset is loaded as the initial state)
-python unitree_lerobot/eval_robot/eval_g1/eval_g1.py  \
+
+# --policy.path: Specifies the path to the pre-trained model, used for evaluating the policy.
+# --repo_id: The repository ID of the dataset, used to load the dataset required for evaluation.
+# --root: The root directory path of the dataset, defaults to an empty string.
+# --episodes: The number of evaluation episodes; setting it to 0 uses the default value.
+# --frequency: The evaluation frequency (in Hz), used to control the time step of the evaluation.
+# --arm: The model of the robotic arm, (e.g., G1_29, G1_23).
+# --ee: The type of end-effector, (e.g., dex3, dex1, inspire1, brainco).
+# --visualization: Whether to enable visualization; setting it to true enables it.
+# --send_real_robot: Whether to send commands to the real robot.
+
+python unitree_lerobot/eval_robot/eval_g1.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true
 
 # If you want to evaluate the model's performance on the dataset, use the command below for testing
-python unitree_lerobot/eval_robot/eval_g1/eval_g1_dataset.py  \
+python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true \
+    --send_real_robot=false
 ```
 
-# 5. 🤔 Troubleshooting
+
+# 5. 🎬 Replay Datasets On Robot 
+
+ 
+This section provides instructions on how to replay datasets on the robot. 
+It is useful for testing and validating the robot's behavior using pre-recorded data. 
+
+
+```bash
+
+# --repo_id         Dataset repository ID on Hugging Face Hub (e.g., unitreerobotics/G1_ToastedBread_Dataset)
+# --root            Path to the root directory of the dataset (leave empty to use the default cache path)
+# --episodes        Index of the episode to replay (e.g., 0 for the first episode)
+# --frequency       Replay frequency in Hz (e.g., 30 for 30 frames per second)
+# --arm             Type of robot arm used (e.g., G1_29, G1_23)
+# --ee              Type of end-effector used (e.g., dex3, dex1, inspire1, brainco)
+# --visualization   Enable or disable visualization during replay (true for enabling, false for disabling)
+
+python unitree_lerobot/eval_robot/repaly_robot.py \
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true
+```
+
+
+# 6. 🤔 Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -196,9 +248,11 @@ python unitree_lerobot/eval_robot/eval_g1/eval_g1_dataset.py  \
 | **Access to model `google/paligemma-3b-pt-224` is restricted.** | Run `huggingface-cli login` and request access if needed. |
 
 
-# 6. 🙏 Acknowledgement
+# 7. 🙏 Acknowledgement
 
-This code builds upon following open-source code-bases. Please visit the URLs to see the respective LICENSES:
+This code builds upon following open-source code-bases. Please visit the URLs to see the respective LICENSES (If you find these projects valuable, it would be greatly appreciated if you could give them a star rating.):
 
 1. https://github.com/huggingface/lerobot
 2. https://github.com/unitreerobotics/unitree_sdk2_python
+3. https://github.com/unitreerobotics/xr_teleoperate
+4. https://github.com/unitreerobotics/unitree_sim_isaaclab
