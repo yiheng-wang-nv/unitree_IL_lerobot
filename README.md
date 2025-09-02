@@ -21,6 +21,19 @@
 | Unitree Sim IsaacLab |[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)                                                                        |
 
 
+# 🔖 Release Note
+
+### 🏷️ v0.2 
+1.Add `data conversion` and `model deployment` for `brainco` and `inspire1` Dexterous hands.
+
+2.Add the functionality of `replaying the robot dataset`.
+
+3.Add `simulation environment verification` [unitree_sim_isaaclab].
+
+### 🏷️ v0.1
+Support `data conversion`, `model deployment`, and `real-world testing` for `G1 + Dex1 + Dex3`.
+
+
 # 0. 📖 Introduction
 
 This repository is used for `lerobot training validation`(Supports LeRobot datasets version 2.0 and above.) and `unitree data conversion`.
