@@ -195,6 +195,7 @@ def setup_robot_interface(args: argparse.Namespace) -> Dict[str, Any]:
         }
 
     # ---------- Simulation helpers (optional) ----------
+    sim_state_subscriber = None
     if getattr(args, "sim", False):
         reset_pose_publisher = ChannelPublisher("rt/reset_pose/cmd", String_)
         reset_pose_publisher.Init()
@@ -209,6 +210,7 @@ def setup_robot_interface(args: argparse.Namespace) -> Dict[str, Any]:
         "ee_shared_mem": ee_shared_mem,
         "arm_dof": int(arm_spec["dof"]),
         "ee_dof": ee_dof,
+        "sim_state_subscriber": sim_state_subscriber,
     }
 
 
@@ -226,18 +228,11 @@ def process_images_and_observations(
     if has_wrist_cam and current_wrist_image is not None:
         left_wrist_cam = current_wrist_image[:, : wrist_img_shape[1] // 2]
         right_wrist_cam = current_wrist_image[:, wrist_img_shape[1] // 2 :]
-
     observation = {
         "observation.images.cam_left_high": torch.from_numpy(left_top_cam),
-        "observation.images.cam_right_high": torch.from_numpy(right_top_cam)
-        if right_top_cam is not None
-        else torch.zeros(1),
-        "observation.images.cam_left_wrist": torch.from_numpy(left_wrist_cam)
-        if left_wrist_cam is not None
-        else torch.zeros(1),
-        "observation.images.cam_right_wrist": torch.from_numpy(right_wrist_cam)
-        if right_wrist_cam is not None
-        else torch.zeros(1),
+        "observation.images.cam_right_high": torch.from_numpy(right_top_cam) if is_binocular else None,
+        "observation.images.cam_left_wrist": torch.from_numpy(left_wrist_cam) if has_wrist_cam else None,
+        "observation.images.cam_right_wrist": torch.from_numpy(right_wrist_cam) if has_wrist_cam  else None,
     }
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 

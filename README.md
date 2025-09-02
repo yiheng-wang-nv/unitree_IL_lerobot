@@ -1,9 +1,24 @@
-**Read this in other languages: [中文](./docs/README_zh.md).**
+
+
+
+<div align="center">
+  <h1 align="center"> unitree_IL_lerobot </h1>
+  <h3 align="center"> Unitree Robotics </h3> 
+  <p align="center">
+    <a href="./README.md"> English </a> | <a href="./docs/README_zh.md">中文</a> 
+  </p>
+    <p align="center">
+     <a href="https://discord.gg/ZwcVwxv5rq" target="_blank"><img src="https://img.shields.io/badge/-Discord-5865F2?style=flat&logo=Discord&logoColor=white" alt="Unitree LOGO"></a>
+  </p>
+</div>
+
+
 
 |Unitree Robotics  repositories        | link |
 |---------------------|------|
 | Unitree Datasets   | [unitree datasets](https://huggingface.co/unitreerobotics) |
 | AVP Teleoperate    | [avp_teleoperate](https://github.com/unitreerobotics/avp_teleoperate) |
+| Unitree Sim IsaacLab |[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)                                                                        |
 
 
 # 0. 📖 Introduction
@@ -185,6 +200,8 @@ To test your trained model on a real robot, you can use the eval_g1.py script lo
 # --ee: The type of end-effector, (e.g., dex3, dex1, inspire1, brainco).
 # --visualization: Whether to enable visualization; setting it to true enables it.
 # --send_real_robot: Whether to send commands to the real robot.
+# --sim: Whether to perform inference in the unitree_sim_isaaclab simulation environment.
+
 
 python unitree_lerobot/eval_robot/eval_g1.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
@@ -194,7 +211,8 @@ python unitree_lerobot/eval_robot/eval_g1.py  \
     --frequency=30 \
     --arm="G1_29" \
     --ee="dex3" \
-    --visualization=true
+    --visualization=true \
+    --sim=false
 
 # If you want to evaluate the model's performance on the dataset, use the command below for testing
 python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
@@ -208,6 +226,8 @@ python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
     --visualization=true \
     --send_real_robot=false
 ```
+
+**Note:**  If you are using the `unitree_sim_isaaclab` simulation environment, please refer to [unitree\_sim\_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab) for environment setup and usage instructions.
 
 
 # 5. 🎬 Replay Datasets On Robot 

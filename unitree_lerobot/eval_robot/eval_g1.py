@@ -65,8 +65,8 @@ def eval_policy(
         robot_interface = setup_robot_interface(cfg)
 
         # Unpack interfaces for convenience
-        arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof = (
-            robot_interface[key] for key in ["arm_ctrl", "arm_ik", "ee_shared_mem", "arm_dof", "ee_dof"]
+        arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof, sim_state_subscriber = (
+            robot_interface[key] for key in ["arm_ctrl", "arm_ik", "ee_shared_mem", "arm_dof", "ee_dof", "sim_state_subscriber"]
         )
         tv_img_array, wrist_img_array, tv_img_shape, wrist_img_shape, is_binocular, has_wrist_cam = (
             image_info[key]
@@ -87,7 +87,9 @@ def eval_policy(
 
         user_input = input("Enter 's' to initialize the robot and start the evaluation: ")
         idx = 0
-        if user_input.lower() != "s":
+        print(f"user_input: {user_input}")
+        if user_input.lower() == "s":
+        
             # "The initial positions of the robot's arm and fingers take the initial positions during data recording."
             logger_mp.info("Initializing robot to starting pose...")
             tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
@@ -103,18 +105,16 @@ def eval_policy(
                 observation, current_arm_q = process_images_and_observations(
                     tv_img_array, wrist_img_array, tv_img_shape, wrist_img_shape, is_binocular, has_wrist_cam, arm_ctrl
                 )
-
                 left_ee_state = right_ee_state = np.array([])
                 if cfg.ee:
                     with ee_shared_mem["lock"]:
                         full_state = np.array(ee_shared_mem["state"][:])
                         left_ee_state = full_state[:ee_dof]
                         right_ee_state = full_state[ee_dof:]
-
-                state_tensor = torch.from_numpy(np.concatenate((current_arm_q, left_ee_state, right_ee_state))).float()
+                state_tensor = torch.from_numpy(np.concatenate((current_arm_q, left_ee_state, right_ee_state), axis=0)).float()
                 observation["observation.state"] = state_tensor
-
-                # 2. Get Action from Policy
+            
+                    # 2. Get Action from Policy
                 action = predict_action(
                     observation, policy, get_safe_torch_device(policy.config.device), policy.config.use_amp
                 )
@@ -150,6 +150,10 @@ def eval_policy(
     finally:
         if image_info:
             cleanup_resources(image_info)
+        # Clean up sim state subscriber if it exists
+        if 'sim_state_subscriber' in locals() and sim_state_subscriber:
+            sim_state_subscriber.stop_subscribe()
+            logger_mp.info("SimStateSubscriber cleaned up")
 
 
 @parser.wrap()
@@ -170,7 +174,7 @@ def eval_main(cfg: EvalRealConfig):
     policy.eval()
 
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
-        eval_policy(policy, dataset)
+        eval_policy(cfg=cfg, policy=policy, dataset=dataset)
 
     logging.info("End of eval")
 

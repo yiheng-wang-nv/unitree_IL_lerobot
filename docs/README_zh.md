@@ -1,7 +1,22 @@
+
+<div align="center">
+  <h1 align="center"> unitree_IL_lerobot </h1>
+  <h3 align="center"> Unitree Robotics </h3> 
+  <p align="center">
+    <a href="../README.md"> English </a> | <a href="./README_zh.md">中文</a> 
+  </p>
+    <p align="center">
+     <a href="https://discord.gg/ZwcVwxv5rq" target="_blank"><img src="https://img.shields.io/badge/-Discord-5865F2?style=flat&logo=Discord&logoColor=white" alt="Unitree LOGO"></a>
+  </p>
+</div>
+
+
+
 |Unitree Robotics  repositories        | link |
 |---------------------|------|
 | Unitree Datasets   | [unitree datasets](https://huggingface.co/unitreerobotics) |
 | AVP Teleoperate    | [avp_teleoperate](https://github.com/unitreerobotics/avp_teleoperate) |
+| Unitree Sim IsaacLab |[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)                                                                        |
 
 
 # 0. 📖 介绍
@@ -162,19 +177,44 @@ python src/lerobot/scripts/train.py \
 # 4. 🤖 真机测试
 [如何打开 image_server](https://github.com/unitreerobotics/avp_teleoperate?tab=readme-ov-file#31-%EF%B8%8F-image-server)
 ```bash
-# --policy.path 训练保存模型路径
-# --repo_id     训练加载的数据集(为什么要用? 加载数据集中第一帧状态做为起始动作)
 
-python unitree_lerobot/eval_robot/eval_g1/eval_g1.py  \
+# --policy.path: 指定预训练模型的路径，用于评估策略。
+# --repo_id: 数据集的仓库ID，用于加载评估所需的数据集。
+# --root: 数据集的根目录路径，默认为空字符串。
+# --episodes: 评估的回合数；设为0表示使用默认值。
+# --frequency: 评估频率（单位：Hz），用于控制评估的时间步长。
+# --arm: 机器人手臂的型号，例如 G1_29、G1_23。
+# --ee: 末端执行器的类型，例如 dex3、dex1、inspire1、brainco。
+# --visualization: 是否启用可视化；设置为 true 表示启用。
+# --send_real_robot: 是否将指令发送到真实机器人。
+# --sim: 是否在 unitree_sim_isaaclab 仿真环境中进行推理。
+
+
+python unitree_lerobot/eval_robot/eval_g1.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true \
+    --sim=false
 
-
-# 如果你想验证模型在数据集上的表现 使用下面去测试
-python unitree_lerobot/eval_robot/eval_g1/eval_g1_dataset.py  \
+# If you want to evaluate the model's performance on the dataset, use the command below for testing
+python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true \
+    --send_real_robot=false
 ```
+
+**注意:** 如果使用unitree_sim_isaaclab仿真环境,请参考[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)进行环境的搭建与运行.
 
 # 5. 🤔 Troubleshooting
 
