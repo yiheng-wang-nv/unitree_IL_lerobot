@@ -31,8 +31,7 @@ def extract_observation(step: dict):
     return observation
 
 
-
-def predict_action(observation, policy, device, use_amp):
+def predict_action(observation, policy, device, use_amp, use_dataset=False):
     observation = copy(observation)
     with (
         torch.inference_mode(),
@@ -40,16 +39,17 @@ def predict_action(observation, policy, device, use_amp):
     ):
         # Convert to pytorch format: channel first and float32 in [0,1] with batch dimension
         for name in observation:
-            # Skip non-tensor observations (like task strings)
-            if not hasattr(observation[name], 'unsqueeze'):
-                continue
-            if "images" in name:
-                # Convert RGB to BGR
-                observation[name] = observation[name][:, :, [2, 1, 0]]  # RGB -> BGR
-                observation[name] = observation[name].type(torch.float32) / 255
-                observation[name] = observation[name].permute(2, 0, 1).contiguous()
-            observation[name] = observation[name].unsqueeze(0)
-            observation[name] = observation[name].to(device)
+            if not use_dataset:
+                # Skip non-tensor observations (like task strings)
+                if not hasattr(observation[name], 'unsqueeze'):
+                    continue
+                if "images" in name:
+                    # Convert RGB to BGR
+                    observation[name] = observation[name][:, :, [2, 1, 0]]  # RGB -> BGR
+                    observation[name] = observation[name].type(torch.float32) / 255
+                    observation[name] = observation[name].permute(2, 0, 1).contiguous()
+        
+            observation[name] = observation[name].unsqueeze(0).to(device)
 
         # Compute the next action with the policy
         # based on the current observation

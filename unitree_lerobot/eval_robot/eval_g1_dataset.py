@@ -87,7 +87,7 @@ def eval_policy(
             observation = extract_observation(step)
 
             action = predict_action(
-                observation, policy, get_safe_torch_device(policy.config.device), policy.config.use_amp
+                observation, policy, get_safe_torch_device(policy.config.device), policy.config.use_amp, use_dataset=True
             )
             action_np = action.cpu().numpy()
 
