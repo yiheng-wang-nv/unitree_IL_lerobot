@@ -148,7 +148,9 @@ Convert `Unitree JSON` Dataset to `LeRobot` Format. You can define your own `rob
 # --raw-dir     Corresponds to the directory of your JSON dataset
 # --repo-id     Your unique repo ID on Hugging Face Hub
 # --push_to_hub Whether or not to upload the dataset to Hugging Face Hub (true or false)
-# --robot_type  The type of the robot used in the dataset (e.g., Unitree_Z1_Single, Unitree_Z1_Dual, Unitree_G1_Dex1, Unitree_G1_Dex3, Unitree_G1_Brainco, Unitree_G1_Inspire) 
+# --robot_type  The type of the robot used in the dataset (e.g., Unitree_Z1_Single, Unitree_Z1_Dual, Unitree_G1_Dex1, Unitree_G1_Dex3, Unitree_G1_Brainco, Unitree_G1_Inspire,Unitree_G1_Dex1_Sim) 
+
+
 
 python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
     --raw-dir $HOME/datasets \
@@ -156,7 +158,8 @@ python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
     --robot_type Unitree_G1_Dex3 \ 
     --push_to_hub
 ```
-
+**Node:**  `Unitree_G1_Dex1_Sim` is a robot type used for data collection in unitree_sim_isaaclab
+, with the head equipped with a single-viewpoint camera.
 
 # 3. 🚀 Training
 

@@ -95,6 +95,40 @@ G1_DEX1_CONFIG = RobotConfig(
 )
 
 
+G1_DEX1_CONFIG_SIM = RobotConfig(
+    motors=[
+        "kLeftShoulderPitch",
+        "kLeftShoulderRoll",
+        "kLeftShoulderYaw",
+        "kLeftElbow",
+        "kLeftWristRoll",
+        "kLeftWristPitch",
+        "kLeftWristYaw",
+        "kRightShoulderPitch",
+        "kRightShoulderRoll",
+        "kRightShoulderYaw",
+        "kRightElbow",
+        "kRightWristRoll",
+        "kRightWristPitch",
+        "kRightWristYaw",
+        "kLeftGripper",
+        "kRightGripper",
+    ],
+    cameras=[
+        "cam_left_high",
+        "cam_left_wrist",
+        "cam_right_wrist",
+    ],
+    camera_to_image_key={
+        "color_0": "cam_left_high",
+        "color_1": "cam_left_wrist",
+        "color_2": "cam_right_wrist",
+    },
+    json_state_data_name=["left_arm", "right_arm", "left_ee", "right_ee"],
+    json_action_data_name=["left_arm", "right_arm", "left_ee", "right_ee"],
+)
+
+
 G1_DEX3_CONFIG = RobotConfig(
     motors=[
         "kLeftShoulderPitch",
@@ -239,6 +273,7 @@ ROBOT_CONFIGS = {
     "Unitree_Z1_Single": Z1_SINGLE_CONFIG,
     "Unitree_Z1_Dual": Z1_CONFIG,
     "Unitree_G1_Dex1": G1_DEX1_CONFIG,
+    "Unitree_G1_Dex1_Sim": G1_DEX1_CONFIG_SIM,
     "Unitree_G1_Dex3": G1_DEX3_CONFIG,
     "Unitree_G1_Brainco": G1_BRAINCO_CONFIG,
     "Unitree_G1_Inspire": G1_INSPIRE_CONFIG,
