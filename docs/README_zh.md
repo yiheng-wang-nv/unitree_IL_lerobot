@@ -216,7 +216,36 @@ python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
 
 **注意:** 如果使用unitree_sim_isaaclab仿真环境,请参考[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)进行环境的搭建与运行.
 
-# 5. 🤔 Troubleshooting
+
+
+# 5. 🎬 在机器人上replay数据集
+
+ 
+这一部分提供了在机器人上重放数据集的说明。它对于使用预先录制的数据来测试和验证机器人的行为非常有用。
+
+
+```bash
+
+# --repo_id         Hugging Face Hub 上的数据集仓库 ID（例如：unitreerobotics/G1_ToastedBread_Dataset）
+# --root            数据集根目录路径（留空则使用默认的缓存路径）
+# --episodes        要重放的轨迹索引（例如：0 表示第一个轨迹）
+# --frequency       重放频率，单位 Hz（例如：30 表示每秒 30 帧）
+# --arm             使用的机械臂类型（例如：G1_29，G1_23）
+# --ee              使用的末端执行器类型（例如：dex3，dex1，inspire1，brainco）
+# --visualization   是否在重放时启用可视化（true 表示启用，false 表示禁用）
+
+python unitree_lerobot/eval_robot/repaly_robot.py \
+    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --root="" \
+    --episodes=0 \
+    --frequency=30 \
+    --arm="G1_29" \
+    --ee="dex3" \
+    --visualization=true
+```
+
+
+# 6. 🤔 Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
@@ -226,9 +255,11 @@ python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
 | **Access to model `google/paligemma-3b-pt-224` is restricted.** | Run `huggingface-cli login` and request access if needed. |
 
 
-# 6. 🙏 致谢
+# 7. 🙏 致谢
 
 此代码基于以下开源代码库进行构建。请访问以下链接查看相关的许可证：
 
 1. https://github.com/huggingface/lerobot
 2. https://github.com/unitreerobotics/unitree_sdk2_python
+3. https://github.com/unitreerobotics/xr_teleoperate
+4. https://github.com/unitreerobotics/unitree_sim_isaaclab
