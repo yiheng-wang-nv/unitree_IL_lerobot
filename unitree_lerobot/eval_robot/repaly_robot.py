@@ -55,13 +55,14 @@ def replay_main(cfg: EvalRealConfig):
 
     logger_mp.info(f"Starting evaluation loop at {cfg.frequency} Hz.")
 
-    dataset = LeRobotDataset(repo_id=cfg.repo_id, root=cfg.root, episodes=[cfg.episodes])
+    dataset = LeRobotDataset(repo_id=cfg.repo_id, root=cfg.root, episodes=[cfg.episodes], video_backend="pyav")
     actions = dataset.hf_dataset.select_columns("action")
 
     # init pose
     from_idx = dataset.episode_data_index["from"][0].item()
-    step = dataset[from_idx]
-    init_left_arm_pose = step["observation.state"][:14].cpu().numpy()
+    # Avoid decoding video frames by reading state directly from the HF dataset
+    state_arr = dataset.hf_dataset[from_idx]["observation.state"]
+    init_left_arm_pose = np.array(state_arr)[:14]
 
     user_input = input("Please enter the start signal (enter 's' to start the subsequent program):")
     if user_input.lower() == "s":
