@@ -146,8 +146,6 @@ Convert `Unitree JSON` Dataset to `LeRobot` Format. You can define your own `rob
 # --push_to_hub Whether or not to upload the dataset to Hugging Face Hub (true or false)
 # --robot_type  The type of the robot used in the dataset (e.g., Unitree_Z1_Single, Unitree_Z1_Dual, Unitree_G1_Dex1, Unitree_G1_Dex3, Unitree_G1_Brainco, Unitree_G1_Inspire,Unitree_G1_Dex1_Sim)
 
-
-
 python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
     --raw-dir $HOME/datasets \
     --repo-id your_name/repo_task_name \
@@ -213,7 +211,6 @@ To test your trained model on a real robot, you can use the eval_g1.py script lo
 # --visualization: Whether to enable visualization; setting it to true enables it.
 # --send_real_robot: Whether to send commands to the real robot.
 # --sim: Whether to perform inference in the unitree_sim_isaaclab simulation environment.
-
 
 python unitree_lerobot/eval_robot/eval_g1.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
