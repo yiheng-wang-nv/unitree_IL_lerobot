@@ -1,4 +1,3 @@
-
 <div align="center">
   <h1 align="center"> unitree_IL_lerobot </h1>
   <h3 align="center"> Unitree Robotics </h3> 
@@ -10,33 +9,29 @@
   </p>
 </div>
 
-
-
-|Unitree Robotics  repositories        | link |
-|---------------------|------|
-| Unitree Datasets   | [unitree datasets](https://huggingface.co/unitreerobotics) |
-| AVP Teleoperate    | [avp_teleoperate](https://github.com/unitreerobotics/avp_teleoperate) |
-| Unitree Sim IsaacLab |[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)                                                                        |
-
+| Unitree Robotics repositories | link                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| Unitree Datasets              | [unitree datasets](https://huggingface.co/unitreerobotics)                      |
+| AVP Teleoperate               | [avp_teleoperate](https://github.com/unitreerobotics/avp_teleoperate)           |
+| Unitree Sim IsaacLab          | [unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab) |
 
 # 0. 📖 介绍
 
-此存储库是使用`lerobot训练验证`(支持lerobot 数据集 v2.0以上版本)和`unitree数据转换`
+此存储库是使用`lerobot训练验证`(支持 lerobot 数据集 v2.0 以上版本)和`unitree数据转换`
 
 `❗Tips：如果您有任何疑问，想法或建议，请随时随时提出它们。我们将尽最大努力解决和实现。`
 
-| 目录          | 说明                                                                                                                |
-| ------------- | ------------------------------------------------------------------------------------------------------------------- |
-| lerobot       | `lerobot` 仓库代码，其对应的 commit 版本号为 `0878c68` |
-| utils         | `unitree 数据处理工具`     |
-| eval_robot    | `unitree 模型真机推理验证`     |
+| 目录       | 说明                                                   |
+| ---------- | ------------------------------------------------------ |
+| lerobot    | `lerobot` 仓库代码，其对应的 commit 版本号为 `0878c68` |
+| utils      | `unitree 数据处理工具`                                 |
+| eval_robot | `unitree 模型真机推理验证`                             |
 
 # 1. 📦 环境安装
 
 ## 1.1 🦾 LeRobot 环境安装
 
 本项的目的是使用[LeRobot](https://github.com/huggingface/lerobot)开源框架训练并测试基于 Unitree 机器人采集的数据。所以首先需要安装 LeRobot 相关依赖。安装步骤如下，也可以参考[LeRobot](https://github.com/huggingface/lerobot)官方进行安装:
-
 
 ```bash
 # 下载源码
@@ -56,9 +51,10 @@ cd lerobot && pip install -e .
 cd .. && pip install -e .
 ```
 
-
 ## 1.2 🕹️ unitree_sdk2_python
+
 针对 Unitree 机器人`dds通讯`需要安装一些依赖,安装步骤如下:
+
 ```
 git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
 cd unitree_sdk2_python  && pip install -e .
@@ -67,14 +63,15 @@ cd unitree_sdk2_python  && pip install -e .
 # 2. ⚙️ 数据采集与转换
 
 ## 2.1 🖼️ 数据加载测试
-如果你想加载我们已经录制好的数据集, 你可以从 huggingface上加载 [`unitreerobotics/G1_ToastedBread_Dataset`](https://huggingface.co/datasets/unitreerobotics/G1_ToastedBread_Dataset) 数据集, 默认下载到`~/.cache/huggingface/lerobot/unitreerobotics`. 如果想从加载本地数据请更改 `root` 参数 
+
+如果你想加载我们已经录制好的数据集, 你可以从 huggingface 上加载 [`unitreerobotics/G1_Dex3_ToastedBread_Dataset`](https://huggingface.co/datasets/unitreerobotics/G1_Dex3_ToastedBread_Dataset) 数据集, 默认下载到`~/.cache/huggingface/lerobot/unitreerobotics`. 如果想从加载本地数据请更改 `root` 参数
 
 ```python
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import tqdm
 
 episode_index = 1
-dataset = LeRobotDataset(repo_id="unitreerobotics/G1_ToastedBread_Dataset")
+dataset = LeRobotDataset(repo_id="unitreerobotics/G1_Dex3_ToastedBread_Dataset")
 
 from_idx = dataset.episode_data_index["from"][episode_index].item()
 to_idx = dataset.episode_data_index["to"][episode_index].item()
@@ -83,13 +80,13 @@ for step_idx in tqdm.tqdm(range(from_idx, to_idx)):
     step = dataset[step_idx]
 ```
 
-`可视化` 
+`可视化`
 
 ```bash
 cd unitree_lerobot/lerobot
 
 python src/lerobot/scripts/visualize_dataset.py \
-    --repo-id unitreerobotics/G1_ToastedBread_Dataset \
+    --repo-id unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --episode-index 0
 ```
 
@@ -100,6 +97,7 @@ python src/lerobot/scripts/visualize_dataset.py \
 ## 2.3 🛠️ 数据转换
 
 使用[avp_teleoperate](https://github.com/unitreerobotics/avp_teleoperate)采集的数据是采用 JSON 格式进行存储。假如采集的数据存放在`$HOME/datasets/task_name` 目录中，格式如下:
+
 ```
 datasets/                               # 数据集文件夹
     └── task_name /                     # 任务名称
@@ -128,54 +126,60 @@ python unitree_lerobot/utils/sort_and_rename_folders.py \
 
 ```bash
 # --raw-dir     对应json的数据集目录
-# --repo-id     对应自己的repo-id 
-# --push_to_hub 是否上传到云端 
-# --robot_type  对应的机器人类型 
+# --repo-id     对应自己的repo-id
+# --push_to_hub 是否上传到云端
+# --robot_type  对应的机器人类型
 
-python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py  
-    --raw-dir $HOME/datasets    
-    --repo-id your_name/repo_task_name  
+python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py
+    --raw-dir $HOME/datasets
+    --repo-id your_name/repo_task_name
     --robot_type Unitree_G1_Dex3    # e.g., Unitree_Z1_Single, Unitree_Z1_Dual, Unitree_G1_Dex1, Unitree_G1_Dex3, Unitree_G1_Brainco,Unitree_G1_Dex1_Sim, Unitree_G1_Inspire
     --push_to_hub
 ```
+
 **注意:** `Unitree_G1_Dex1_Sim` 是在[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)采集数据的机器人类型，头部只有一个视角的图像。
 
 # 3. 🚀 训练
 
-[请详细阅读官方lerobot训练实例与相关参数](https://github.com/huggingface/lerobot/blob/main/examples/4_train_policy_with_script.md)
-
+[请详细阅读官方 lerobot 训练实例与相关参数](https://github.com/huggingface/lerobot/blob/main/examples/4_train_policy_with_script.md)
 
 - `训练 act`
+
 ```
 cd unitree_lerobot/lerobot
 
 python src/lerobot/scripts/train.py \
-    --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --dataset.repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --policy.push_to_hub=false \
-    --policy.type=act 
+    --policy.type=act
 ```
 
 - `训练 Diffusion Policy`
+
 ```
 cd unitree_lerobot/lerobot
 
 python src/lerobot/scripts/train.py \
-    --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --dataset.repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --policy.push_to_hub=false \
     --policy.type=diffusion
 ```
+
 - `训练 pi0`
+
 ```
 cd unitree_lerobot/lerobot
 
 python src/lerobot/scripts/train.py \
-    --dataset.repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --dataset.repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --policy.push_to_hub=false \
     --policy.type=pi0
 ```
 
 # 4. 🤖 真机测试
+
 [如何打开 image_server](https://github.com/unitreerobotics/avp_teleoperate?tab=readme-ov-file#31-%EF%B8%8F-image-server)
+
 ```bash
 
 # --policy.path: 指定预训练模型的路径，用于评估策略。
@@ -192,7 +196,7 @@ python src/lerobot/scripts/train.py \
 
 python unitree_lerobot/eval_robot/eval_g1.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --root="" \
     --episodes=0 \
     --frequency=30 \
@@ -204,7 +208,7 @@ python unitree_lerobot/eval_robot/eval_g1.py  \
 # If you want to evaluate the model's performance on the dataset, use the command below for testing
 python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
     --policy.path=unitree_lerobot/lerobot/outputs/train/2025-03-25/22-11-16_diffusion/checkpoints/100000/pretrained_model \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --root="" \
     --episodes=0 \
     --frequency=30 \
@@ -214,19 +218,15 @@ python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
     --send_real_robot=false
 ```
 
-**注意:** 如果使用unitree_sim_isaaclab仿真环境,请参考[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)进行环境的搭建与运行.
+**注意:** 如果使用 unitree_sim_isaaclab 仿真环境,请参考[unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab)进行环境的搭建与运行.
 
+# 5. 🎬 在机器人上 replay 数据集
 
-
-# 5. 🎬 在机器人上replay数据集
-
- 
 这一部分提供了在机器人上重放数据集的说明。它对于使用预先录制的数据来测试和验证机器人的行为非常有用。
-
 
 ```bash
 
-# --repo_id         Hugging Face Hub 上的数据集仓库 ID（例如：unitreerobotics/G1_ToastedBread_Dataset）
+# --repo_id         Hugging Face Hub 上的数据集仓库 ID（例如：unitreerobotics/G1_Dex3_ToastedBread_Dataset）
 # --root            数据集根目录路径（留空则使用默认的缓存路径）
 # --episodes        要重放的轨迹索引（例如：0 表示第一个轨迹）
 # --frequency       重放频率，单位 Hz（例如：30 表示每秒 30 帧）
@@ -235,7 +235,7 @@ python unitree_lerobot/eval_robot/eval_g1_dataset.py  \
 # --visualization   是否在重放时启用可视化（true 表示启用，false 表示禁用）
 
 python unitree_lerobot/eval_robot/repaly_robot.py \
-    --repo_id=unitreerobotics/G1_ToastedBread_Dataset \
+    --repo_id=unitreerobotics/G1_Dex3_ToastedBread_Dataset \
     --root="" \
     --episodes=0 \
     --frequency=30 \
@@ -244,16 +244,14 @@ python unitree_lerobot/eval_robot/repaly_robot.py \
     --visualization=true
 ```
 
-
 # 6. 🤔 Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| **Why use `LeRobot v2.0`?** | [Explanation](https://github.com/huggingface/lerobot/pull/461) |
-| **401 Client Error: Unauthorized** (`huggingface_hub.errors.HfHubHTTPError`) | Run `huggingface-cli login` to authenticate. |
-| **FFmpeg-related errors:**  <br> Q1: `Unknown encoder 'libsvtav1'` <br> Q2: `FileNotFoundError: No such file or directory: 'ffmpeg'` <br> Q3: `RuntimeError: Could not load libtorchcodec. Likely causes: FFmpeg is not properly installed.` | Install FFmpeg: <br> `conda install -c conda-forge ffmpeg` |
-| **Access to model `google/paligemma-3b-pt-224` is restricted.** | Run `huggingface-cli login` and request access if needed. |
-
+| Problem                                                                                                                                                                                                                                     | Solution                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| **Why use `LeRobot v2.0`?**                                                                                                                                                                                                                 | [Explanation](https://github.com/huggingface/lerobot/pull/461) |
+| **401 Client Error: Unauthorized** (`huggingface_hub.errors.HfHubHTTPError`)                                                                                                                                                                | Run `huggingface-cli login` to authenticate.                   |
+| **FFmpeg-related errors:** <br> Q1: `Unknown encoder 'libsvtav1'` <br> Q2: `FileNotFoundError: No such file or directory: 'ffmpeg'` <br> Q3: `RuntimeError: Could not load libtorchcodec. Likely causes: FFmpeg is not properly installed.` | Install FFmpeg: <br> `conda install -c conda-forge ffmpeg`     |
+| **Access to model `google/paligemma-3b-pt-224` is restricted.**                                                                                                                                                                             | Run `huggingface-cli login` and request access if needed.      |
 
 # 7. 🙏 致谢
 
