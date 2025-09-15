@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass
 from lerobot.configs import parser
 from lerobot.configs.policies import PreTrainedConfig
+from lerobot.policies.pretrained import PreTrainedPolicy
 
 
 import logging_mp
@@ -31,7 +32,14 @@ def extract_observation(step: dict):
     return observation
 
 
-def predict_action(observation, policy, device, use_amp, use_dataset=False):
+def predict_action(
+    observation: dict[str, np.ndarray],
+    policy: PreTrainedPolicy,
+    device: torch.device,
+    use_amp: bool,
+    task: str | None = None,
+    use_dataset: bool | None = False,
+):
     observation = copy(observation)
     with (
         torch.inference_mode(),
@@ -50,6 +58,8 @@ def predict_action(observation, policy, device, use_amp, use_dataset=False):
                     observation[name] = observation[name].permute(2, 0, 1).contiguous()
         
             observation[name] = observation[name].unsqueeze(0).to(device)
+
+        observation["task"] = [task if task else ""]
 
         # Compute the next action with the policy
         # based on the current observation
@@ -92,35 +102,6 @@ def to_scalar(x):
         return float(x[0])
     return float(x)
 
-
-def parse_args() -> argparse.Namespace:
-    """Parses command-line arguments."""
-    parser = argparse.ArgumentParser(description="Evaluate a trained policy on the robot.")
-    parser.add_argument("--repo_id", type=str, help="lerobot repo_id")
-    parser.add_argument("--root", type=str, default="", help="root directory for the dataset")
-    parser.add_argument("--episodes", type=int, default=0, help="episodes to evaluate")
-    parser.add_argument("--frequency", type=float, default=30.0, help="data's frequency")
-
-    # Basic control parameters
-    parser.add_argument(
-        "--arm", type=str, choices=["G1_29", "G1_23", "H1_2", "H1"], default="G1_29", help="Select arm controller"
-    )
-    parser.add_argument(
-        "--ee",
-        type=str,
-        choices=["dex1", "dex3", "inspire1", "brainco"],
-        default="dex3",
-        help="Select end effector controller",
-    )
-
-    # Mode flags
-    parser.add_argument("--motion", action="store_true", help="Enable motion control mode")
-    parser.add_argument("--headless", action="store_true", help="Enable headless mode (no display)")
-    parser.add_argument("--sim", action="store_true", help="Enable isaac simulation mode")
-    parser.add_argument("--visualization", action="store_true", help="Rerun visualization")
-    parser.add_argument("--send_real_robot", action="store_true", help="Enable execute on real robot mode")
-
-    return parser.parse_args()
 
 
 @dataclass
