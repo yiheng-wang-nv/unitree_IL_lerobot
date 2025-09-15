@@ -81,7 +81,7 @@ class G1_29_ArmController:
 
         self.all_motor_q = None
         self.arm_velocity_limit = 20.0
-        self.control_dt = 1.0 / 250.0
+        self.control_dt = 1.0 / 100.0
 
         self._speed_gradual_max = False
         self._gradual_start_time = None
