@@ -114,7 +114,6 @@ def eval_policy(
                         right_ee_state = full_state[ee_dof:]
                 state_tensor = torch.from_numpy(np.concatenate((current_arm_q, left_ee_state, right_ee_state), axis=0)).float()
                 observation["observation.state"] = state_tensor
-            
                 # 2. Get Action from Policy
                 action = predict_action(
                     observation,
@@ -122,7 +121,7 @@ def eval_policy(
                     get_safe_torch_device(policy.config.device),
                     policy.config.use_amp,
                     step["task"],
-                    use_dataset=True,
+                    use_dataset=cfg.use_dataset,
                 )
                 action_np = action.cpu().numpy()
 
