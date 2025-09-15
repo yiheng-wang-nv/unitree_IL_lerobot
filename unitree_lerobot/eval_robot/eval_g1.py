@@ -79,6 +79,7 @@ def eval_policy(
                 "has_wrist_cam",
             ]
         )
+        
 
         # Get initial pose from the first step of the dataset
         from_idx = dataset.episode_data_index["from"][0].item()
