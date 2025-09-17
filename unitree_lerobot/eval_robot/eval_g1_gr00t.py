@@ -172,7 +172,7 @@ def eval_main(cfg: EvalRealConfig):
     modality_transform = data_config.transform()
 
     policy = Gr00tPolicy(
-        model_path="/home/nvidia/workspace/yiheng/i4h-workflows-internal/third_party/Isaac-GR00T/g1_medical_overfitting_100k",
+        model_path=cfg.model_path,
         modality_config=modality_config,
         modality_transform=modality_transform,
         embodiment_tag="new_embodiment",
