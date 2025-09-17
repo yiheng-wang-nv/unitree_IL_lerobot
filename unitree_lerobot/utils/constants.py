@@ -161,16 +161,10 @@ G1_DEX3_CONFIG = RobotConfig(
         "kRightHandMiddle1",
     ],
     cameras=[
-        "cam_left_high",
-        "cam_right_high",
-        "cam_left_wrist",
-        "cam_right_wrist",
+        "ego_view",
     ],
     camera_to_image_key={
-        "color_0": "cam_left_high",
-        "color_1": "cam_right_high",
-        "color_2": "cam_left_wrist",
-        "color_3": "cam_right_wrist",
+        "color_0": "ego_view",
     },
     json_state_data_name=["left_arm", "right_arm", "left_ee", "right_ee"],
     json_action_data_name=["left_arm", "right_arm", "left_ee", "right_ee"],
