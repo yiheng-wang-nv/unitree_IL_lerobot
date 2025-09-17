@@ -21,11 +21,6 @@ python sim_main.py --device cpu \
   --enable_dex3_dds --robot_type g129 \
   --action_source=dds
 
-python sim_main.py --device cpu \
-  --enable_cameras --task Isaac-PickPlace-Cylinder-G129-Dex3-Joint \
-  --enable_dex3_dds --robot_type g129 \
-  --action_source=dds
-
 conda activate unitree_lerobot
 cd ~/code/unitree/unitree_IL_lerobot/
 python unitree_lerobot/eval_robot/replay_robot.py \
