@@ -35,17 +35,12 @@ def extract_observation(step: dict):
 def predict_action(
     observation: dict[str, np.ndarray],
     policy: PreTrainedPolicy,
-    device: torch.device,
-    use_amp: bool,
     task: str | None = None,
     use_dataset: bool | None = False,
     use_gr00t: bool | None = False,
 ):
     observation = copy(observation)
-    with (
-        torch.inference_mode(),
-        torch.autocast(device_type=device.type) if device.type == "cuda" and use_amp else nullcontext(),
-    ):
+    with torch.inference_mode():
         # Convert to pytorch format: channel first and float32 in [0,1] with batch dimension
         for name in observation:
             if not use_dataset and not use_gr00t:
@@ -61,10 +56,7 @@ def predict_action(
             if use_gr00t:
                 if "video" in name:
                     observation[name] = observation[name].to(torch.uint8)
-                    # (c, h, w) to (h, w, c)
-                    observation[name] = observation[name].permute(1, 2, 0).contiguous()
-            observation[name] = observation[name].unsqueeze(0).to(device)
-
+            observation[name] = observation[name].unsqueeze(0)
         observation["annotation.human.task_description"] = [task if task else ""]
         # Compute the next action with the policy
         # based on the current observation

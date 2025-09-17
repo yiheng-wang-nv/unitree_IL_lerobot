@@ -37,7 +37,8 @@ from unitree_lerobot.eval_robot.utils.utils import (
 
 )
 from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visualization_data
-from gr00t.eval.service import ExternalRobotInferenceClient
+from gr00t.model.policy import BasePolicy, Gr00tPolicy
+from gr00t.experiment.data_config import UnitreeG1DataConfig_v2
 
 import logging_mp
 
@@ -46,6 +47,7 @@ logger_mp = logging_mp.get_logger(__name__)
 
 
 def eval_policy(
+    policy,
     cfg: EvalRealConfig,
     dataset: LeRobotDataset,
 ):
@@ -54,7 +56,6 @@ def eval_policy(
 
     if cfg.visualization:
         rerun_logger = RerunLogger()
-    policy = ExternalRobotInferenceClient(host="localhost", port=5555)
     image_info = None
     try:
         # --- Setup Phase ---
@@ -125,13 +126,11 @@ def eval_policy(
                     arm_action = action_np[:arm_dof]
                     tau = arm_ik.solve_tau(arm_action)
                     arm_ctrl.ctrl_dual_arm(arm_action, tau)
-                    # logger_mp.info(f"arm_action {arm_action}, tau {tau}")
 
                     if cfg.ee:
                         ee_action_start_idx = arm_dof
                         left_ee_action = action_np[ee_action_start_idx : ee_action_start_idx + ee_dof]
                         right_ee_action = action_np[ee_action_start_idx + ee_dof : ee_action_start_idx + 2 * ee_dof]
-                        # logger_mp.info(f"EE Action: left {left_ee_action}, right {right_ee_action}")
 
                         if isinstance(ee_shared_mem["left"], SynchronizedArray):
                             ee_shared_mem["left"][:] = to_list(left_ee_action)
@@ -161,9 +160,6 @@ def eval_policy(
 def eval_main(cfg: EvalRealConfig):
     logging.info(pformat(asdict(cfg)))
 
-    # Check device is available
-    device = get_safe_torch_device(cfg.policy.device, log=True)
-
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -171,8 +167,21 @@ def eval_main(cfg: EvalRealConfig):
 
     dataset = LeRobotDataset(repo_id=cfg.repo_id)
 
-    with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
-        eval_policy(cfg=cfg, dataset=dataset)
+    data_config = UnitreeG1DataConfig_v2()
+    modality_config = data_config.modality_config()
+    modality_transform = data_config.transform()
+
+    policy = Gr00tPolicy(
+        model_path="/home/nvidia/workspace/yiheng/i4h-workflows-internal/third_party/Isaac-GR00T/g1_medical_overfitting_100k",
+        modality_config=modality_config,
+        modality_transform=modality_transform,
+        embodiment_tag="new_embodiment",
+        device="cuda",
+    )
+
+
+    with torch.no_grad():
+        eval_policy(policy, cfg=cfg, dataset=dataset)
 
     logging.info("End of eval")
 
