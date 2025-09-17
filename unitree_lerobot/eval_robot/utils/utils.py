@@ -35,19 +35,15 @@ def extract_observation(step: dict):
 def predict_action(
     observation: dict[str, np.ndarray],
     policy: PreTrainedPolicy,
-    device: torch.device,
-    use_amp: bool,
     task: str | None = None,
     use_dataset: bool | None = False,
+    use_gr00t: bool | None = False,
 ):
     observation = copy(observation)
-    with (
-        torch.inference_mode(),
-        torch.autocast(device_type=device.type) if device.type == "cuda" and use_amp else nullcontext(),
-    ):
+    with torch.inference_mode():
         # Convert to pytorch format: channel first and float32 in [0,1] with batch dimension
         for name in observation:
-            if not use_dataset:
+            if not use_dataset and not use_gr00t:
                 # Skip non-tensor observations (like task strings)
                 if not hasattr(observation[name], 'unsqueeze'):
                     continue
@@ -56,20 +52,24 @@ def predict_action(
                     observation[name] = observation[name][:, :, [2, 1, 0]]  # RGB -> BGR
                     observation[name] = observation[name].type(torch.float32) / 255
                     observation[name] = observation[name].permute(2, 0, 1).contiguous()
-        
-            observation[name] = observation[name].unsqueeze(0).to(device)
 
-        observation["task"] = [task if task else ""]
-
+            if use_gr00t:
+                if "video" in name:
+                    observation[name] = observation[name].to(torch.uint8)
+            observation[name] = observation[name].unsqueeze(0)
+        observation["annotation.human.task_description"] = [task if task else ""]
         # Compute the next action with the policy
         # based on the current observation
-        action = policy.select_action(observation)
-
-        # Remove batch dimension
-        action = action.squeeze(0)
-
-        # Move to cpu, if not already the case
-        action = action.to("cpu")
+        if use_gr00t:
+            action_dict = policy.get_action(observation)
+            action = np.concatenate(
+                [np.atleast_1d(action_dict[key]) for key in action_dict.keys()],
+                axis=1,
+            )
+        else:
+            action = policy.select_action(observation)
+            action = action.squeeze(0)
+            action = action.to("cpu").numpy()
 
     return action
 
