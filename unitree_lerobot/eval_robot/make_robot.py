@@ -237,3 +237,17 @@ def process_images_and_observations(
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 
     return observation, current_arm_q
+
+def process_images_and_observations_gr00t(
+    tv_img_array, arm_ctrl
+):
+    """Processes images and generates observations."""
+    current_tv_image = tv_img_array.copy()
+
+    observation = {
+        "video.head_view": torch.from_numpy(current_tv_image),
+        "video.rm_view": torch.from_numpy(current_tv_image),
+    }
+    current_arm_q = arm_ctrl.get_current_dual_arm_q()
+
+    return observation, current_arm_q
