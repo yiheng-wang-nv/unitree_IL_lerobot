@@ -112,6 +112,7 @@ class EvalRealConfig:
     root: str = ""
     episodes: int = 0
     frequency: float = 30.0
+    model_path: str = ""
 
     # Basic control parameters
     arm: str = "G1_29"  # G1_29, G1_23

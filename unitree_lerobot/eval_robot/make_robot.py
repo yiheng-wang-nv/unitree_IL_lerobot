@@ -80,13 +80,13 @@ def setup_image_client(args: argparse.Namespace) -> Dict[str, Any]:
         }
     else:
         img_config = {
-            "fps": 30,
-            "head_camera_type": "opencv",
-            "head_camera_image_shape": [480, 1280],  # Head camera resolution
-            "head_camera_id_numbers": [0],
-            "wrist_camera_type": "opencv",
-            "wrist_camera_image_shape": [480, 640],  # Wrist camera resolution
-            "wrist_camera_id_numbers": [2, 4],
+            'fps': 30,
+            'head_camera_type': 'realsense',
+            'head_camera_image_shape': [480, 640],  # Head camera resolution
+            'head_camera_id_numbers': ["243222073978"],
+            'wrist_camera_type': 'opencv',
+            'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            'wrist_camera_id_numbers': [0],
         }
 
     ASPECT_RATIO_THRESHOLD = 2.0  # If the aspect ratio exceeds this value, it is considered binocular
@@ -123,7 +123,7 @@ def setup_image_client(args: argparse.Namespace) -> Dict[str, Any]:
             server_address="127.0.0.1",
         )
     elif WRIST and not args.sim:
-        wrist_img_shape = (img_config["wrist_camera_image_shape"][0], img_config["wrist_camera_image_shape"][1] * 2, 3)
+        wrist_img_shape = (img_config["wrist_camera_image_shape"][0], img_config["wrist_camera_image_shape"][1], 3)
         wrist_img_shm = shared_memory.SharedMemory(create=True, size=np.prod(wrist_img_shape) * np.uint8().itemsize)
         wrist_img_array = np.ndarray(wrist_img_shape, dtype=np.uint8, buffer=wrist_img_shm.buf)
         img_client = ImageClient(
@@ -239,14 +239,15 @@ def process_images_and_observations(
     return observation, current_arm_q
 
 def process_images_and_observations_gr00t(
-    tv_img_array, arm_ctrl
+    tv_img_array, wrist_img_array, arm_ctrl
 ):
     """Processes images and generates observations."""
     current_tv_image = tv_img_array.copy()
+    current_wrist_image = wrist_img_array.copy() if wrist_img_array is not None else None
 
     observation = {
         "video.head_view": torch.from_numpy(current_tv_image),
-        "video.rm_view": torch.from_numpy(current_tv_image),
+        "video.rm_view": torch.from_numpy(current_wrist_image),
     }
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 

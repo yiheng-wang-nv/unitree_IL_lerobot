@@ -38,7 +38,7 @@ from unitree_lerobot.eval_robot.utils.utils import (
 )
 from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visualization_data
 from gr00t.model.policy import BasePolicy, Gr00tPolicy
-from gr00t.experiment.data_config import UnitreeG1DataConfig_v2
+from gr00t.experiment.data_config import UnitreeG1DataConfig_v4
 
 import logging_mp
 
@@ -83,6 +83,10 @@ def eval_policy(
         from_idx = dataset.episode_data_index["from"][0].item()
         step = dataset[from_idx]
         init_arm_pose = step["observation.state"][:arm_dof].cpu().numpy()
+        logger_mp.info("Initializing robot to starting pose...")
+        tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
+        robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
+        time.sleep(1.0)  # Give time for the robot to move
 
         user_input = input("Enter 's' to initialize the robot and start the evaluation: ")
         idx = 0
@@ -90,10 +94,6 @@ def eval_policy(
         if user_input.lower() == "s":
         
             # "The initial positions of the robot's arm and fingers take the initial positions during data recording."
-            logger_mp.info("Initializing robot to starting pose...")
-            tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
-            robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
-            time.sleep(1.0)  # Give time for the robot to move
 
             # --- Run Main Loop ---
             logger_mp.info(f"Starting evaluation loop at {cfg.frequency} Hz.")
@@ -102,7 +102,7 @@ def eval_policy(
 
                 # 1. Get Observations
                 observation, current_arm_q = process_images_and_observations_gr00t(
-                    tv_img_array, arm_ctrl
+                    tv_img_array, wrist_img_array, arm_ctrl
                 )
                 left_ee_state = right_ee_state = np.array([])
                 if cfg.ee:
@@ -167,12 +167,12 @@ def eval_main(cfg: EvalRealConfig):
 
     dataset = LeRobotDataset(repo_id=cfg.repo_id)
 
-    data_config = UnitreeG1DataConfig_v2()
+    data_config = UnitreeG1DataConfig_v4()
     modality_config = data_config.modality_config()
     modality_transform = data_config.transform()
 
     policy = Gr00tPolicy(
-        model_path="/home/nvidia/workspace/yiheng/i4h-workflows-internal/third_party/Isaac-GR00T/g1_medical_overfitting_100k",
+        model_path=cfg.model_path,
         modality_config=modality_config,
         modality_transform=modality_transform,
         embodiment_tag="new_embodiment",
