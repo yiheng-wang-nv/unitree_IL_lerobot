@@ -7,6 +7,8 @@ Refer to:   lerobot/lerobot/scripts/eval.py
 import time
 import torch
 import logging
+import sys
+import select
 
 import numpy as np
 from pprint import pformat
@@ -88,16 +90,47 @@ def eval_policy(
         robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
         time.sleep(1.0)  # Give time for the robot to move
 
-        user_input = input("Enter 's' to initialize the robot and start the evaluation: ")
-        idx = 0
-        print(f"user_input: {user_input}")
-        if user_input.lower() == "s":
-        
+        quit_program = False
+        while not quit_program:
+            user_input = input("Press 's' to start evaluation, 'r' to reset to initial pose, or 'q' to quit: ")
+            user_input = user_input.strip().lower()
+            print(f"user_input: {user_input}")
+
+            if user_input == "q":
+                logger_mp.info("Quit requested. Exiting.")
+                break
+
+            if user_input == "r":
+                logger_mp.info("Resetting to initial pose...")
+                tau = arm_ik.solve_tau(init_arm_pose)
+                arm_ctrl.ctrl_dual_arm(init_arm_pose, tau)
+                time.sleep(1.0)
+                continue
+
+            if user_input != "s":
+                logger_mp.info("Unrecognized input. Use 's' to start, 'r' to reset, 'q' to quit.")
+                continue
+
             # "The initial positions of the robot's arm and fingers take the initial positions during data recording."
 
             # --- Run Main Loop ---
-            logger_mp.info(f"Starting evaluation loop at {cfg.frequency} Hz.")
+            logger_mp.info(f"Starting evaluation loop at {cfg.frequency} Hz. Press 'r'+Enter to stop & reset; 'q'+Enter to quit.")
+            idx = 0
             while True:
+                # Non-blocking command check (press key then Enter)
+                try:
+                    if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+                        cmd = sys.stdin.readline().strip().lower()
+                        if cmd == "r":
+                            logger_mp.info("Stop & reset requested.")
+                            break
+                        if cmd == "q":
+                            logger_mp.info("Quit requested during evaluation loop.")
+                            quit_program = True
+                            break
+                except Exception:
+                    pass
+
                 loop_start_time = time.perf_counter()
 
                 # 1. Get Observations
@@ -144,6 +177,15 @@ def eval_policy(
                 idx += 1
                 # Maintain frequency
                 time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
+
+            if quit_program:
+                break
+
+            # After a session ends with 'r', return to initial pose automatically
+            logger_mp.info("Returning to initial pose...")
+            tau = arm_ik.solve_tau(init_arm_pose)
+            arm_ctrl.ctrl_dual_arm(init_arm_pose, tau)
+            time.sleep(1.0)
 
     except Exception as e:
         logger_mp.info(f"An error occurred: {e}")
