@@ -144,7 +144,11 @@ def eval_policy(
                         left_ee_state = full_state[:ee_dof]
                         right_ee_state = full_state[ee_dof:]
                 state_tensor = torch.from_numpy(np.concatenate((current_arm_q, left_ee_state, right_ee_state), axis=0)).float()
-                observation["observation.state"] = state_tensor
+                # observation["observation.state"] = state_tensor
+                observation["state.left_arm"] = state_tensor[:7]
+                observation["state.right_arm"] = state_tensor[7:14]
+                observation["state.left_hand"] = state_tensor[14:21]
+                observation["state.right_hand"] = state_tensor[21:28]
                 # 2. Get Action from Policy
                 actions = predict_action(
                     observation,
