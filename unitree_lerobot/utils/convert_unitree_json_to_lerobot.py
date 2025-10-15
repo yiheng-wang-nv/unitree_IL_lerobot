@@ -38,7 +38,7 @@ class DatasetConfig:
     tolerance_s: float = 0.0001
     image_writer_processes: int = 10
     image_writer_threads: int = 5
-    video_backend: str | None = None
+    video_backend: str | None = "h264"
 
 
 DEFAULT_DATASET_CONFIG = DatasetConfig()

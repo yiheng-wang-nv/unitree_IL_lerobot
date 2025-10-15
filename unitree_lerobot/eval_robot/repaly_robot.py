@@ -62,13 +62,13 @@ def replay_main(cfg: EvalRealConfig):
     from_idx = dataset.episode_data_index["from"][0].item()
     step = dataset[from_idx]
     init_left_arm_pose = step["observation.state"][:14].cpu().numpy()
+    tau = arm_ik.solve_tau(init_left_arm_pose)
+    arm_ctrl.ctrl_dual_arm(init_left_arm_pose, tau)
 
     user_input = input("Please enter the start signal (enter 's' to start the subsequent program):")
     if user_input.lower() == "s":
         # "The initial positions of the robot's arm and fingers take the initial positions during data recording."
         logger_mp.info("Initializing robot to starting pose...")
-        tau = arm_ik.solve_tau(init_left_arm_pose)
-        arm_ctrl.ctrl_dual_arm(init_left_arm_pose, tau)
         time.sleep(1)
         for idx in range(dataset.num_frames):
             loop_start_time = time.perf_counter()
@@ -111,6 +111,7 @@ def replay_main(cfg: EvalRealConfig):
             # Maintain frequency
             time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
 
+    time.sleep(100)
     cleanup_resources(image_info)
 
 
