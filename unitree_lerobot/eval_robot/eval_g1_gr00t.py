@@ -83,7 +83,9 @@ def eval_policy(
 
         # Get initial pose from the first step of the dataset
         from_idx = dataset.episode_data_index["from"][0].item()
+        print(f"from_idx: {dataset[from_idx]}")
         step = dataset[from_idx]
+        print(f"step: {step}")
         init_arm_pose = step["observation.state"][:arm_dof].cpu().numpy()
         logger_mp.info("Initializing robot to starting pose...")
         tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
@@ -178,9 +180,9 @@ def eval_policy(
 
                     if cfg.visualization:
                         visualization_data(idx, observation, state_tensor.numpy(), action_np, rerun_logger)
-                idx += 1
-                # Maintain frequency
-                time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
+                    idx += 1
+                    # Maintain frequency
+                    time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
 
             if quit_program:
                 break
