@@ -40,7 +40,7 @@ from unitree_lerobot.eval_robot.utils.utils import (
 )
 from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visualization_data
 from gr00t.model.policy import BasePolicy, Gr00tPolicy
-from gr00t.experiment.data_config import UnitreeG1DataConfig_v4
+from gr00t.experiment.data_config import UnitreeG1DataConfig, UnitreeG1DataConfig_v5, UnitreeG1DataConfig_v4
 
 import logging_mp
 
@@ -79,10 +79,10 @@ def eval_policy(
                 "has_wrist_cam",
             ]
         )
-        
+
 
         # Get initial pose from the first step of the dataset
-        from_idx = dataset.episode_data_index["from"][0].item()
+        from_idx = dataset.episode_data_index["from"][cfg.episodes].item()
         print(f"from_idx: {dataset[from_idx]}")
         step = dataset[from_idx]
         print(f"step: {step}")
@@ -215,7 +215,9 @@ def eval_main(cfg: EvalRealConfig):
 
     dataset = LeRobotDataset(repo_id=cfg.repo_id)
 
-    data_config = UnitreeG1DataConfig_v4()
+    data_config = UnitreeG1DataConfig_v5()
+    # data_config = UnitreeG1DataConfig_v4()
+    # data_config = UnitreeG1DataConfig()
     modality_config = data_config.modality_config()
     modality_transform = data_config.transform()
 
