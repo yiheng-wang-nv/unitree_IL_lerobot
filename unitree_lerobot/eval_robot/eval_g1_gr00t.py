@@ -13,12 +13,8 @@ import select
 import numpy as np
 from pprint import pformat
 from dataclasses import asdict
-from torch import nn
-from contextlib import nullcontext
 
-from lerobot.policies.factory import make_policy
 from lerobot.utils.utils import (
-    get_safe_torch_device,
     init_logging,
 )
 from lerobot.configs import parser
@@ -36,11 +32,10 @@ from unitree_lerobot.eval_robot.utils.utils import (
     to_list,
     to_scalar,
     EvalRealConfig
-
 )
 from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visualization_data
-from gr00t.model.policy import BasePolicy, Gr00tPolicy
-from gr00t.experiment.data_config import UnitreeG1DataConfig, UnitreeG1DataConfig_v5, UnitreeG1DataConfig_v4
+from gr00t.model.policy import Gr00tPolicy
+from gr00t.experiment.data_config import UnitreeG1DataConfig_v5
 
 import logging_mp
 
@@ -63,7 +58,7 @@ def eval_policy(
         # --- Setup Phase ---
         image_info = setup_image_client(cfg)
         robot_interface = setup_robot_interface(cfg)
-
+        
         # Unpack interfaces for convenience
         arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof, sim_state_subscriber = (
             robot_interface[key] for key in ["arm_ctrl", "arm_ik", "ee_shared_mem", "arm_dof", "ee_dof", "sim_state_subscriber"]
@@ -79,14 +74,31 @@ def eval_policy(
                 "has_wrist_cam",
             ]
         )
-
-
+        left_ee_init = None
+        right_ee_init = None
         # Get initial pose from the first step of the dataset
         from_idx = dataset.episode_data_index["from"][cfg.episodes].item()
         print(f"from_idx: {dataset[from_idx]}")
         step = dataset[from_idx]
         print(f"step: {step}")
+        # init_arm_pose = step["observation.state"][:arm_dof].cpu().numpy()
         init_arm_pose = step["observation.state"][:arm_dof].cpu().numpy()
+        # Derive initial end-effector targets from dataset if available
+        try:
+            if cfg.ee:
+                full_step_state = step["observation.state"].cpu().numpy()
+                if full_step_state.shape[0] >= (arm_dof + 2 * ee_dof):
+                    left_ee_init = full_step_state[arm_dof : arm_dof + ee_dof]
+                    right_ee_init = full_step_state[arm_dof + ee_dof : arm_dof + 2 * ee_dof]
+                else:
+                    # Fallback to zeros if dataset does not include ee states
+                    left_ee_init = np.zeros((ee_dof,), dtype=float)
+                    right_ee_init = np.zeros((ee_dof,), dtype=float)
+        except Exception:
+            # Conservative fallback
+            if cfg.ee:
+                left_ee_init = np.zeros((ee_dof,), dtype=float)
+                right_ee_init = np.zeros((ee_dof,), dtype=float)
         logger_mp.info("Initializing robot to starting pose...")
         tau = robot_interface["arm_ik"].solve_tau(init_arm_pose)
         robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
@@ -106,6 +118,19 @@ def eval_policy(
                 logger_mp.info("Resetting to initial pose...")
                 tau = arm_ik.solve_tau(init_arm_pose)
                 arm_ctrl.ctrl_dual_arm(init_arm_pose, tau)
+                # Also reset Dex (end-effector) targets to initial dataset pose if configured
+                if cfg.ee and left_ee_init is not None and right_ee_init is not None:
+                    try:
+                        with ee_shared_mem["lock"]:
+                            if isinstance(ee_shared_mem["left"], SynchronizedArray):
+                                ee_shared_mem["left"][:] = to_list(left_ee_init)
+                                ee_shared_mem["right"][:] = to_list(right_ee_init)
+                            elif hasattr(ee_shared_mem["left"], "value") and hasattr(ee_shared_mem["right"], "value"):
+                                # Scalar case (e.g., simple gripper)
+                                ee_shared_mem["left"].value = to_scalar(left_ee_init)
+                                ee_shared_mem["right"].value = to_scalar(right_ee_init)
+                    except Exception:
+                        pass
                 time.sleep(1.0)
                 continue
 
@@ -162,6 +187,7 @@ def eval_policy(
 
                 # 3. Execute Action
                 for action_np in actions:
+                    loop_start_time = time.perf_counter()
                     arm_action = action_np[:arm_dof]
                     tau = arm_ik.solve_tau(arm_action)
                     arm_ctrl.ctrl_dual_arm(arm_action, tau)
@@ -191,6 +217,18 @@ def eval_policy(
             logger_mp.info("Returning to initial pose...")
             tau = arm_ik.solve_tau(init_arm_pose)
             arm_ctrl.ctrl_dual_arm(init_arm_pose, tau)
+            # Also reset Dex (end-effector) targets after each session ends with 'r'
+            if cfg.ee and left_ee_init is not None and right_ee_init is not None:
+                try:
+                    with ee_shared_mem["lock"]:
+                        if isinstance(ee_shared_mem["left"], SynchronizedArray):
+                            ee_shared_mem["left"][:] = to_list(left_ee_init)
+                            ee_shared_mem["right"][:] = to_list(right_ee_init)
+                        elif hasattr(ee_shared_mem["left"], "value") and hasattr(ee_shared_mem["right"], "value"):
+                            ee_shared_mem["left"].value = to_scalar(left_ee_init)
+                            ee_shared_mem["right"].value = to_scalar(right_ee_init)
+                except Exception:
+                    pass
             time.sleep(1.0)
 
     except Exception as e:
@@ -228,8 +266,6 @@ def eval_main(cfg: EvalRealConfig):
         embodiment_tag="new_embodiment",
         device="cuda",
     )
-
-
     with torch.no_grad():
         eval_policy(policy, cfg=cfg, dataset=dataset)
 
