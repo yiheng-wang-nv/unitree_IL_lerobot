@@ -325,6 +325,15 @@ def json_to_lerobot(
         robot_type=robot_type,
     )
 
+    # Copy modality.json from repository root into the created LeRobot dataset folder
+    modality_src = Path(__file__).resolve().parents[2] / "modality.json"
+    dataset_root = HF_LEROBOT_HOME / repo_id
+    if modality_src.exists():
+        shutil.copy(modality_src, dataset_root / "modality.json")
+        print(f"==> Copied modality.json to {dataset_root}")
+    else:
+        print(f"[warn] modality.json not found at {modality_src}")
+
     if push_to_hub:
         dataset.push_to_hub(upload_large_folder=True)
 
