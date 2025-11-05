@@ -6,8 +6,6 @@ fi
 SOURCE_DIR="$1"
 TASK_NAME="$2"
 
-conda activate unitree_lerobot
-
 # put episodes into success/failure/unspecified folders
 python unitree_lerobot/utils/organize_episodes_by_label.py \
   "${SOURCE_DIR}"
@@ -18,9 +16,9 @@ python unitree_lerobot/utils/sort_and_rename_folders.py \
 
 # convert to lerobot format
 mkdir -p "${SOURCE_DIR}/${TASK_NAME}"
-cp -r "${SOURCE_DIR}/success" "${SOURCE_DIR}/${TASK_NAME}"
+cp -r "${SOURCE_DIR}/success" "${SOURCE_DIR}/${TASK_NAME}/${TASK_NAME}"
 
 python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
-    --raw-dir "${SOURCE_DIR}" \
+    --raw-dir "${SOURCE_DIR}/${TASK_NAME}" \
     --repo-id i4h/${TASK_NAME} \
     --robot_type Unitree_G1_Dex3
