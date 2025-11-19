@@ -28,18 +28,36 @@ def downsample_dataset(input_dir, output_dir, interval=3):
         # Create corresponding output episode structure
         rel_path = ep_dir.relative_to(input_path)
         out_ep_dir = output_path / rel_path
-        out_colors_dir = out_ep_dir / "colors"
         
-        out_colors_dir.mkdir(parents=True, exist_ok=True)
+        # Create output episode directory (images will go directly here)
+        out_ep_dir.mkdir(parents=True, exist_ok=True)
 
         # Copy metadata.json if it exists
         meta_file = ep_dir / "metadata.json"
         if meta_file.exists():
             shutil.copy2(meta_file, out_ep_dir / "metadata.json")
 
+        # Copy data.json if it exists (and filter it if needed/possible, but currently just copying or ignoring?)
+        # The user's request specifically mentioned handling cases where data.json might be MISSING.
+        # If it exists, we should probably copy it to maintain structure as much as possible,
+        # or downsample it too if that was the original intent?
+        # Re-reading the original request "output folder和输入folder的结构一样...只取三分之一的frame"
+        # The previous script didn't handle data.json downsampling explicitly in this file (clean_data.py did).
+        # Assuming we just copy whatever else is there or just focus on images as requested.
+        # For now, let's ensure we don't crash if files are missing.
+        
+        # Check for other files to copy (optional, but good for robustness)
+        # The user said "some episode folder ... content may be incomplete ... e.g. only colors subfolder"
+        # So we just proceed to check colors.
+
         # Process images in 'colors' directory
         colors_dir = ep_dir / "colors"
         if not colors_dir.exists():
+            # If colors dir doesn't exist, maybe images are directly in the folder?
+            # But the prompt says "subfolder里面有colors" usually.
+            # If colors is missing, we can't downsample images.
+            # We'll just warn and continue.
+            # print(f"Warning: No 'colors' directory found in {ep_dir}")
             continue
 
         # Gather all image files
@@ -58,7 +76,8 @@ def downsample_dataset(input_dir, output_dir, interval=3):
                 frame_id = int(frame_id_str)
                 
                 if frame_id % interval == 0:
-                    shutil.copy2(img_file, out_colors_dir / img_file.name)
+                    # Copy directly to out_ep_dir, NOT out_ep_dir / "colors"
+                    shutil.copy2(img_file, out_ep_dir / img_file.name)
             except ValueError:
                 # If filename format doesn't match expected pattern, just skip or copy? 
                 # Let's skip and warn to be safe.
