@@ -10,6 +10,8 @@ import torch
 import logging
 import sys
 import select
+import queue
+import threading
 
 from datetime import datetime
 from pathlib import Path
@@ -184,6 +186,45 @@ class EpisodeImageRecorder:
         self._num_frames = 0
 
 
+class AsyncEpisodeImageRecorder(EpisodeImageRecorder):
+    def __init__(self, base_dir: Path):
+        super().__init__(base_dir)
+        self.queue = queue.Queue()
+        self.saving_thread = threading.Thread(target=self._save_worker, daemon=True)
+        self.saving_thread.start()
+
+    def _save_worker(self):
+        while True:
+            item = self.queue.get()
+            if item is None:
+                break
+
+            # Unpack and save
+            step_index, observation = item
+            super().record_step(step_index, observation)
+            self.queue.task_done()
+
+    def record_step_async(self, step_index: int, observation: Dict[str, object]):
+        # We must COPY the observation/images because they might be overwritten
+        # in shared memory before the thread saves them.
+        obs_copy = {}
+        for k, v in observation.items():
+            if "video" in k and v is not None:
+                # Ensure we copy the tensor/numpy array to own the memory
+                obs_copy[k] = v.clone() if isinstance(v, torch.Tensor) else v.copy()
+
+        self.queue.put((step_index, obs_copy))
+
+    def stop(self):
+        self.queue.put(None)
+        self.saving_thread.join()
+
+    def finish_episode(self, status: str, total_steps: int) -> None:
+        # Wait for all pending saves to complete so num_frames is accurate
+        self.queue.join()
+        super().finish_episode(status, total_steps)
+
+
 def eval_policy(
     policy,
     cfg: EvalRealConfig,
@@ -245,7 +286,7 @@ def eval_policy(
         robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
         time.sleep(1.0)  # Give time for the robot to move
 
-        episode_recorder: Optional[EpisodeImageRecorder] = None
+        episode_recorder: Optional[AsyncEpisodeImageRecorder] = None
         if getattr(cfg, "record_data", False):
             if getattr(cfg, "record_dir", ""):
                 record_dir = Path(cfg.record_dir).expanduser()
@@ -254,7 +295,7 @@ def eval_policy(
                 record_dir = base_root / "recordings"
             record_dir = record_dir.resolve()
             logger_mp.info(f"Recording enabled. Saving episodes to {record_dir}.")
-            episode_recorder = EpisodeImageRecorder(record_dir)
+            episode_recorder = AsyncEpisodeImageRecorder(record_dir)
             if episode_recorder.last_index > 0:
                 logger_mp.info(
                     f"Detected existing recordings up to episode_{episode_recorder.last_index:04d}; continuing numbering."
@@ -374,8 +415,15 @@ def eval_policy(
                     for action_np in actions:
                         loop_start_time = time.perf_counter()
 
+                        # CRITICAL FIX: Update observation inside the loop for recording
+                        # We need to capture what the robot actually sees NOW, not what it saw at the start of the chunk.
+                        # Note: 'process_images_and_observations_gr00t' effectively takes a snapshot.
+                        current_obs, _ = process_images_and_observations_gr00t(
+                            tv_img_array, wrist_img_array, arm_ctrl
+                        )
+
                         if episode_recorder and episode_recorder.is_recording:
-                            episode_recorder.record_step(idx, observation)
+                            episode_recorder.record_step_async(idx, current_obs)
 
                         arm_action = action_np[:arm_dof]
                         tau = arm_ik.solve_tau(arm_action)
