@@ -25,3 +25,17 @@ python downsample_data.py \
 python generate_dataset_index.py \
   /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data \
   /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data/dataset_info.csv
+
+# train value function
+python train_value_func.py \
+  --csv /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data/dataset_info.csv \
+  --data-dir /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data \
+  --fold 0 \
+  --multiplier 1.5 \
+  --num-classes 201 \
+  --model efficientnet_b0 \
+  --batch-size 32 \
+  --epochs 100 \
+  --lr 3e-4 \
+  --weight-decay 0.01 \
+  --output /localhome/local-vennw/code/unitree_IL_lerobot/checkpoints/value_func_efnb0_100e
