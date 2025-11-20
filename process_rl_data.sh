@@ -23,5 +23,5 @@ python downsample_data.py \
 # /home/nvidia/workspace/datasets/install_trocar_from_tray_realsense_rl_data
 
 python generate_dataset_index.py \
-  /home/nvidia/workspace/datasets/install_trocar_from_tray_realsense_rl_data \
-  /home/nvidia/workspace/datasets/install_trocar_from_tray_realsense_rl_data/dataset_info.csv
+  /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data \
+  /localhome/local-vennw/code/datasets/install_trocar_from_tray_realsense_rl_data/dataset_info.csv
