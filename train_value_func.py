@@ -21,24 +21,21 @@ from timm.optim import create_optimizer_v2
 from timm.scheduler import create_scheduler_v2
 from timm.models import create_model
 
-# --- 0. New Sampler Definition (Implementation of Pi-Star/QT-Opt Strategy) ---
+# --- 0. Balanced Sampler (Unchanged) ---
 class BalancedBatchSampler(Sampler):
     def __init__(self, dataset, batch_size):
         self.dataset = dataset
         self.batch_size = batch_size
         
-        # Ensure batch_size is even for 50/50 split
         if self.batch_size % 2 != 0:
             print(f"Warning: Batch size {self.batch_size} is odd. Rounding down for balanced split.")
         
-        # Get labels from dataset (pre-calculated in dataset __init__)
+        # Get labels from dataset (0=Failure Zone, 1=Success Zone)
         targets = np.array(self.dataset.sample_labels)
         
-        self.neg_indices = np.where(targets == 0)[0]  # Failure (Bin 0)
-        self.pos_indices = np.where(targets > 0)[0]   # Success (Bin > 0)
+        self.neg_indices = np.where(targets == 0)[0]  # Failure (Value < -1.0)
+        self.pos_indices = np.where(targets > 0)[0]   # Success (Value >= -1.0)
         
-        # Strategy: Use the larger set as the baseline length to ensure we see all data
-        # The smaller set will cycle (repeat) within the epoch
         self.n_samples = max(len(self.neg_indices), len(self.pos_indices))
         self.half_batch = self.batch_size // 2
         self.n_batches = self.n_samples // self.half_batch
@@ -49,7 +46,6 @@ class BalancedBatchSampler(Sampler):
         print(f"  - Total Batches per Epoch: {self.n_batches}")
 
     def __iter__(self):
-        # Shuffle indices at the start of each epoch
         neg_indices_shuffled = self.neg_indices.copy()
         pos_indices_shuffled = self.pos_indices.copy()
         np.random.shuffle(neg_indices_shuffled)
@@ -73,23 +69,20 @@ class BalancedBatchSampler(Sampler):
                 batch_indices.append(idx)
                 pos_ptr += 1
             
-            # Note: batch_sampler yields a LIST of indices
             yield batch_indices
 
     def __len__(self):
         return self.n_batches
 
-# --- 1. Model Definition: Multi-View Fusion ---
+# --- 1. Model Definition (Unchanged) ---
 class MultiViewValueModel(nn.Module):
     def __init__(self, backbone_name='efficientnet_b0', pretrained=True, num_classes=201):
         super().__init__()
         print(f"Creating Multi-View Model with backbone: {backbone_name}")
         
-        # Shared visual backbone (remove classification head)
         self.backbone = create_model(backbone_name, pretrained=pretrained, num_classes=0)
         self.feat_dim = self.backbone.num_features
         
-        # Fusion head: 3 image features -> num_classes
         input_dim = self.feat_dim * 3
         
         self.head = nn.Sequential(
@@ -98,49 +91,52 @@ class MultiViewValueModel(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(1024, 512),
             nn.ReLU(),
-            nn.Linear(512, num_classes) # Output Logits
+            nn.Linear(512, num_classes) 
         )
 
     def forward(self, img_room, img_left_wrist, img_right_wrist):
-        # Extract features (shared weights)
         f_room = self.backbone(img_room)
         f_left = self.backbone(img_left_wrist)
         f_right  = self.backbone(img_right_wrist)
         
-        # Concatenate
         concat_feat = torch.cat([f_room, f_left, f_right], dim=1)
-        
-        # Predict
         logits = self.head(concat_feat)
         return logits
 
-# --- 2. Dataset Definition ---
+# --- 2. Dataset Definition (Updated for RECAP Logic) ---
 class RecapDataset(Dataset):
-    def __init__(self, csv_path, root_dir, transform=None, fold=0, is_training=True, failure_multiplier=1.5, num_classes=201):
+    def __init__(self, csv_path, root_dir, transform=None, fold=0, is_training=True, 
+                 min_val=-2.5, max_val=0.0, num_classes=201):
         self.root_dir = root_dir
         self.transform = transform
-        self.min_val = -failure_multiplier
-        self.max_val = 0.0
+        
+        # RECAP Unified Range
+        self.min_val = min_val
+        self.max_val = max_val
         self.num_classes = num_classes
         
         # Read CSV
         df = pd.read_csv(csv_path)
         
-        # Split by Fold
         if is_training:
             self.data = df[df['fold'] != fold].reset_index(drop=True)
         else:
             self.data = df[df['fold'] == fold].reset_index(drop=True)
             
-        # Pre-calculate labels for weighted sampling (0=Failure, 1=Success)
+        # --- Generate Labels for Balanced Sampler ---
+        # Define boundary: Values < -1.0 are considered "Failure/Penalty Zone"
+        # Values >= -1.0 are considered "Success Zone"
         self.sample_labels = []
+        boundary_threshold = -1.0001 
+        
         for val in self.data['normalized_value']:
-            if abs(val - self.min_val) < 1e-6:
-                self.sample_labels.append(0) # Failure
+            if val < boundary_threshold:
+                self.sample_labels.append(0) # Failure (Class 0 for sampler)
             else:
-                self.sample_labels.append(1) # Success
+                self.sample_labels.append(1) # Success (Class 1 for sampler)
             
         print(f"Dataset loaded: {len(self.data)} samples (Training: {is_training})")
+        print(f"Global Value Range: [{self.min_val}, {self.max_val}] -> {self.num_classes} Bins")
 
     def __len__(self):
         return len(self.data)
@@ -150,16 +146,14 @@ class RecapDataset(Dataset):
         
         ep_id = f"episode_{int(row['episode_id']):04d}"
         fr_id = f"{int(row['frame_id']):06d}"
-        status = row['status'] # 'success' or 'failure'
+        status = row['status'] 
         
         path_base = os.path.join(self.root_dir, status, ep_id)
         
-        # Cam 0: room, Cam 1: left wrist, Cam 2: right wrist
         p_room = os.path.join(path_base, f"{fr_id}_color_0.jpg") 
         p_left = os.path.join(path_base, f"{fr_id}_color_1.jpg")
         p_right  = os.path.join(path_base, f"{fr_id}_color_2.jpg")
 
-        # Load images
         img_room = Image.open(p_room).convert('RGB')
         img_left = Image.open(p_left).convert('RGB')
         img_right = Image.open(p_right).convert('RGB')
@@ -169,10 +163,16 @@ class RecapDataset(Dataset):
             img_left = self.transform(img_left)
             img_right = self.transform(img_right)
 
-        # Process Label
+        # --- Unified Label Processing ---
         raw_val = float(row['normalized_value'])
+        
+        # 1. Clip to global range
         val = max(self.min_val, min(self.max_val, raw_val))
+        
+        # 2. Linear Normalize to 0~1
         norm = (val - self.min_val) / (self.max_val - self.min_val)
+        
+        # 3. Map to discrete bin
         label = int(round(norm * (self.num_classes - 1)))
         label = max(0, min(self.num_classes - 1, label))
         
@@ -183,21 +183,21 @@ _logger = logging.getLogger('train')
 
 def main():
     parser = argparse.ArgumentParser()
-    # Dataset
     parser.add_argument('--csv', type=str, required=True)
     parser.add_argument('--data-dir', type=str, required=True)
-    parser.add_argument('--fold', type=int, default=0, help='Validation fold index')
-    parser.add_argument('--multiplier', type=float, default=1.5, help='Failure penalty multiplier')
-    parser.add_argument('--num-classes', type=int, default=201, help='Number of classes/bins')
+    parser.add_argument('--fold', type=int, default=0)
     
-    # Model
+    # RECAP Range Arguments (Replaces multiplier)
+    parser.add_argument('--min-val', type=float, default=-2.5, help='Min value (Failure Start), default -2.5')
+    parser.add_argument('--max-val', type=float, default=0.0, help='Max value (Success End), default 0.0')
+    parser.add_argument('--num-classes', type=int, default=201)
+    
+    # Model Params
     parser.add_argument('--model', default='efficientnet_b0', type=str)
-    parser.add_argument('--batch-size', type=int, default=8) # Keeping 8 is fine for high-res
+    parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight-decay', type=float, default=0.01)
-    
-    # System
     parser.add_argument('--workers', type=int, default=16)
     parser.add_argument('--output', default='./output', type=str)
     
@@ -210,11 +210,9 @@ def main():
     log_path = os.path.join(args.output, 'train.log')
     
     handler = logging.FileHandler(log_path)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     _logger.addHandler(handler)
     _logger.setLevel(logging.INFO)
-
     _logger.info(f"Logging to {log_path}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -225,30 +223,17 @@ def main():
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD = [0.229, 0.224, 0.225]
 
-    # --- TRAINING TRANSFORMS (Robot-Safe) ---
+    # --- TRANSFORMS ---
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(
-            size=(IMG_HEIGHT, IMG_WIDTH), 
-            scale=(0.90, 1.0), 
-            ratio=(0.95, 1.05),
-            interpolation=transforms.InterpolationMode.BILINEAR
-        ),
-        transforms.RandomAffine(
-            degrees=0, 
-            translate=(0.05, 0.05), 
-            scale=None, 
-            shear=None
-        ),
+        transforms.RandomResizedCrop(size=(IMG_HEIGHT, IMG_WIDTH), scale=(0.90, 1.0), ratio=(0.95, 1.05), interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
         transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.05),
         transforms.RandomGrayscale(p=0.1),
-        transforms.RandomApply([
-            transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))
-        ], p=0.2),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 2.0))], p=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
     ])
 
-    # --- VALIDATION TRANSFORMS ---
     val_transform = transforms.Compose([
         transforms.Resize((IMG_HEIGHT, IMG_WIDTH)),
         transforms.ToTensor(),
@@ -256,49 +241,49 @@ def main():
     ])
 
     # 2. Datasets
+    # Pass min_val and max_val correctly
     dataset_train = RecapDataset(
         args.csv, args.data_dir, transform=train_transform, 
-        fold=args.fold, is_training=True, failure_multiplier=args.multiplier,
-        num_classes=args.num_classes
+        fold=args.fold, is_training=True, 
+        min_val=args.min_val, max_val=args.max_val, num_classes=args.num_classes
     )
     dataset_val = RecapDataset(
         args.csv, args.data_dir, transform=val_transform, 
-        fold=args.fold, is_training=False, failure_multiplier=args.multiplier,
-        num_classes=args.num_classes
+        fold=args.fold, is_training=False, 
+        min_val=args.min_val, max_val=args.max_val, num_classes=args.num_classes
     )
 
-    # --- MODIFIED: Balanced Batch Sampler ---
-    # Replaced WeightedRandomSampler with BalancedBatchSampler
+    # 3. Sampler
     train_batch_sampler = BalancedBatchSampler(dataset_train, batch_size=args.batch_size)
 
-    # Use batch_sampler in DataLoader
-    # Note: batch_size, shuffle, sampler, drop_last are mutually exclusive with batch_sampler
     loader_train = DataLoader(
         dataset_train, 
-        batch_sampler=train_batch_sampler, # <--- Using the new sampler
+        batch_sampler=train_batch_sampler, 
         num_workers=args.workers, 
         pin_memory=True
     )
     
-    # Validation loader remains standard
     loader_val = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False, 
                             num_workers=args.workers, pin_memory=True)
 
-    # 3. Model
+    # 4. Model
     model = MultiViewValueModel(backbone_name=args.model, pretrained=True, num_classes=args.num_classes)
     model.to(device)
 
-    # 4. Optimizer & Scheduler
     optimizer = create_optimizer_v2(model, opt='adamw', lr=args.lr, weight_decay=args.weight_decay)
     scheduler, _ = create_scheduler_v2(optimizer, sched='cosine', num_epochs=args.epochs, warmup_epochs=5)
     
-    # 5. Loss
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1, reduction='none')
     
-    # 6. Training Loop
     _logger.info(f"Start training for {args.epochs} epochs...")
-    
     best_mae = float('inf')
+    
+    # Pre-calculate bin values mapping (0..200 -> min..max)
+    bin_values = torch.linspace(args.min_val, args.max_val, args.num_classes).to(device).unsqueeze(0)
+    
+    # Define Failure Boundary (The gap between Success start -1.0 and Failure)
+    # Anything predicted below this is considered "Predicting Failure"
+    failure_boundary = -1.0 
     
     for epoch in range(args.epochs):
         model.train()
@@ -310,8 +295,6 @@ def main():
             target = target.to(device)
             
             optimizer.zero_grad()
-            
-            # Forward
             output = model(img_f, img_w, img_s) 
             loss_per_sample = criterion(output, target)
             loss = loss_per_sample.mean()
@@ -323,21 +306,14 @@ def main():
             train_bar.set_postfix(loss=train_loss_m.avg)
             
         _logger.info(f"Epoch {epoch} Train Loss: {train_loss_m.avg:.4f}")
-
         scheduler.step(epoch)
         
         # Validation
         model.eval()
         val_loss_m = utils.AverageMeter()
-        acc_m = utils.AverageMeter()
         mae_m = utils.AverageMeter()
-        
-        fail_acc_m = utils.AverageMeter()
-        succ_mae_m = utils.AverageMeter()
-        fail_loss_m = utils.AverageMeter()
-        succ_loss_m = utils.AverageMeter()
-        
-        bin_values = torch.linspace(dataset_train.min_val, dataset_train.max_val, args.num_classes).to(device).unsqueeze(0)
+        fail_detect_m = utils.AverageMeter() # "Did we correctly see the failure?"
+        succ_mae_m = utils.AverageMeter()    # "How close are we on success tracks?"
         
         with torch.no_grad():
             for (img_f, img_w, img_s, target) in loader_val:
@@ -346,41 +322,44 @@ def main():
                 
                 output = model(img_f, img_w, img_s)
                 loss_per_sample = criterion(output, target)
-                loss = loss_per_sample.mean()
                 
-                acc1, _ = utils.accuracy(output, target, topk=(1, 5))
-                
+                # 1. Predict Value (Expectation)
                 probs = torch.softmax(output, dim=1)
-                pred_val = torch.sum(probs * bin_values, dim=1)
+                pred_val = torch.sum(probs * bin_values, dim=1) # Float
+                
+                # 2. Target Value (Float)
                 target_val = bin_values[0, target]
+                
+                # 3. Global MAE
                 mae = torch.abs(pred_val - target_val).mean()
                 
-                # Metrics split
-                fail_mask = (target == 0)
+                # --- RECAP Metrics ---
+                # Use the computed float values to separate Success/Failure
+                # GT < -1.0 is Failure
+                fail_mask = (target_val < failure_boundary)
                 succ_mask = ~fail_mask
-                pred_cls = output.argmax(dim=1)
                 
+                # Metric A: Failure Detection Rate
+                # If GT is Failure, is Pred also Failure (< -1.0)?
                 if fail_mask.sum() > 0:
-                    # Failure is correct if predicted bin is 0 (or close to 0, e.g., <=2)
-                    fail_correct = (pred_cls[fail_mask] == 0).float().mean()
-                    fail_acc_m.update(fail_correct.item(), fail_mask.sum().item())
-                    fail_loss_m.update(loss_per_sample[fail_mask].mean().item(), fail_mask.sum().item())
+                    detected = (pred_val[fail_mask] < failure_boundary).float().mean()
+                    fail_detect_m.update(detected.item(), fail_mask.sum().item())
                 
+                # Metric B: Success MAE
+                # If GT is Success, how close is the value?
                 if succ_mask.sum() > 0:
                     succ_mae = torch.abs(pred_val[succ_mask] - target_val[succ_mask]).mean()
                     succ_mae_m.update(succ_mae.item(), succ_mask.sum().item())
-                    succ_loss_m.update(loss_per_sample[succ_mask].mean().item(), succ_mask.sum().item())
 
-                val_loss_m.update(loss.item(), img_f.size(0))
-                acc_m.update(acc1.item(), img_f.size(0))
+                val_loss_m.update(loss_per_sample.mean().item(), img_f.size(0))
                 mae_m.update(mae.item(), img_f.size(0))
         
         current_mae = mae_m.avg
         _logger.info(
             f"Epoch {epoch} Eval: "
             f"Loss {val_loss_m.avg:.4f}, "
-            f"MAE {current_mae:.4f}, "
-            f"Fail-Acc {fail_acc_m.avg*100:.1f}%, "
+            f"Global-MAE {current_mae:.4f}, "
+            f"Fail-Detect-Rate {fail_detect_m.avg*100:.1f}%, "
             f"Succ-MAE {succ_mae_m.avg:.4f}"
         )
         
