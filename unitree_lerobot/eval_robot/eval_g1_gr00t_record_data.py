@@ -181,11 +181,12 @@ def eval_policy(
             episode_counter += 1
             logger_mp.info(
                 f"Starting evaluation loop at {cfg.frequency} Hz (episode {episode_counter:04d}). "
-                "Press 'r'+Enter to stop & reset; 'q'+Enter to quit."
+                "Press 'r'+Enter to stop & reset; 'q'+Enter to quit; 'p'+Enter to pause/resume."
             )
             idx = 0
             episode_stop_reason = "manual_stop"
             task_name = ""
+            is_paused = False
             if hasattr(step, "get"):
                 try:
                     task_name = step.get("task", "")
@@ -215,8 +216,25 @@ def eval_policy(
                                 episode_stop_reason = "quit"
                                 quit_program = True
                                 break
+                            if cmd == "p":
+                                is_paused = not is_paused
+                                logger_mp.info(f"Pause toggled: {'PAUSED' if is_paused else 'RESUMED'}")
+                                if is_paused:
+                                    # Stay in current position
+                                    # Get current pose and hold it
+                                    current_q = arm_ctrl.get_current_dual_arm_q()
+                                    tau = arm_ik.solve_tau(current_q)
+                                    arm_ctrl.ctrl_dual_arm(current_q, tau)
+                                    continue # Skip rest of loop to hold position
+                                
                     except Exception:
                         pass
+
+                    if is_paused:
+                        # Keep holding current position
+                        # We can add a small sleep to prevent busy loop
+                        time.sleep(0.1)
+                        continue
 
                     loop_start_time = time.perf_counter()
 
@@ -258,7 +276,7 @@ def eval_policy(
                         # But action execution loop might be faster than image update (30Hz vs control freq).
                         # process_images_and_observations_gr00t also does a sleep if called in loop? No, it just reads.
                         
-                        if episode_recorder and episode_recorder.is_ready():
+                        if episode_recorder:
                             # Get current states
                             # Re-read arm state to be precise or use the one from start of loop?
                             # Teleop script reads arm state inside the loop.
