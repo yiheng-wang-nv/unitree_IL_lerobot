@@ -80,13 +80,13 @@ def setup_image_client(args: argparse.Namespace) -> Dict[str, Any]:
         }
     else:
         img_config = {
-            "fps": 30,
-            "head_camera_type": "opencv",
-            "head_camera_image_shape": [480, 1280],  # Head camera resolution
-            "head_camera_id_numbers": [0],
-            "wrist_camera_type": "opencv",
-            "wrist_camera_image_shape": [480, 640],  # Wrist camera resolution
-            "wrist_camera_id_numbers": [2, 4],
+            'fps': 30,
+            'head_camera_type': 'opencv',
+            'head_camera_image_shape': [480, 640],  # Head camera resolution
+            'head_camera_id_numbers': [4],
+            'wrist_camera_type': 'opencv',
+            'wrist_camera_image_shape': [480, 640],  # Wrist camera resolution
+            'wrist_camera_id_numbers': [0, 2],
         }
 
     ASPECT_RATIO_THRESHOLD = 2.0  # If the aspect ratio exceeds this value, it is considered binocular
@@ -233,6 +233,30 @@ def process_images_and_observations(
         "observation.images.cam_right_high": torch.from_numpy(right_top_cam) if is_binocular else None,
         "observation.images.cam_left_wrist": torch.from_numpy(left_wrist_cam) if has_wrist_cam else None,
         "observation.images.cam_right_wrist": torch.from_numpy(right_wrist_cam) if has_wrist_cam  else None,
+    }
+    current_arm_q = arm_ctrl.get_current_dual_arm_q()
+
+    return observation, current_arm_q
+
+def process_images_and_observations_gr00t(
+    tv_img_array, wrist_img_array, arm_ctrl
+):
+    """Processes images and generates observations."""
+    current_tv_image = tv_img_array.copy()
+    current_wrist_image = wrist_img_array.copy() if wrist_img_array is not None else None
+
+    # v4
+    # observation = {
+    #     "video.head_view": torch.from_numpy(current_tv_image),
+    #     "video.rm_view": torch.from_numpy(current_wrist_image),
+    # }
+    # v5
+    left_wrist_cam = current_wrist_image[:, : wrist_img_array.shape[1] // 2]
+    right_wrist_cam = current_wrist_image[:, wrist_img_array.shape[1] // 2 :]
+    observation = {
+        "video.left_wrist_view": torch.from_numpy(left_wrist_cam),
+        "video.right_wrist_view": torch.from_numpy(right_wrist_cam),
+        "video.room_view": torch.from_numpy(current_tv_image),
     }
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 
