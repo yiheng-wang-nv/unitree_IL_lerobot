@@ -1,4 +1,4 @@
-"""'
+"""
 Refer to:   lerobot/lerobot/scripts/eval.py
             lerobot/lerobot/scripts/econtrol_robot.py
             lerobot/robot_devices/control_utils.py
@@ -45,184 +45,17 @@ from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visua
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.experiment.data_config import UnitreeG1DataConfig_v5
 
+# Import EpisodeWriter from teleop
+try:
+    from teleop.utils.episode_writer import EpisodeWriter
+except ImportError:
+    print("Could not import EpisodeWriter. Make sure rl/xr_teleoperate is in python path.")
+    raise
+
 import logging_mp
 
 logging_mp.basic_config(level=logging_mp.INFO)
 logger_mp = logging_mp.get_logger(__name__)
-
-
-class EpisodeImageRecorder:
-    def __init__(self, base_dir: Path):
-        self.base_dir = base_dir
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        self._episode_dir: Optional[Path] = None
-        self._colors_dir: Optional[Path] = None
-        self._meta_path: Optional[Path] = None
-        self._metadata: Optional[Dict[str, object]] = None
-        self._num_frames: int = 0
-        self._last_index: int = self._discover_last_index()
-
-    @staticmethod
-    def _tensor_to_numpy(value: object) -> Optional[np.ndarray]:
-        if value is None:
-            return None
-        if isinstance(value, torch.Tensor):
-            return value.detach().cpu().numpy()
-        if isinstance(value, np.ndarray):
-            return value
-        return None
-
-    @property
-    def is_recording(self) -> bool:
-        return self._episode_dir is not None
-
-    @property
-    def last_index(self) -> int:
-        return self._last_index
-
-    def _write_metadata(self) -> None:
-        if not self._meta_path or self._metadata is None:
-            return
-        with self._meta_path.open("w", encoding="utf-8") as meta_file:
-            json.dump(self._metadata, meta_file, indent=2, default=str)
-
-    def _discover_last_index(self) -> int:
-        max_index = 0
-        try:
-            for child in self.base_dir.iterdir():
-                if not child.is_dir():
-                    continue
-                name = child.name
-                if not name.startswith("episode_"):
-                    continue
-                suffix = name[len("episode_") :]
-                digits = "".join(ch for ch in suffix if ch.isdigit())
-                if not digits:
-                    continue
-                try:
-                    idx = int(digits)
-                except ValueError:
-                    continue
-                max_index = max(max_index, idx)
-        except FileNotFoundError:
-            max_index = 0
-        return max_index
-
-    def start_episode(self, episode_index: int, metadata: Optional[Dict[str, object]] = None) -> None:
-        episode_name = f"episode_{episode_index:04d}"
-        self._episode_dir = self.base_dir / episode_name
-        self._episode_dir.mkdir(parents=True, exist_ok=True)
-        self._colors_dir = self._episode_dir / "colors"
-        self._colors_dir.mkdir(parents=True, exist_ok=True)
-        self._meta_path = self._episode_dir / "metadata.json"
-        self._metadata = {
-            "episode_index": episode_index,
-            "started_at": datetime.now().isoformat(),
-        }
-        if metadata:
-            self._metadata.update(metadata)
-        self._num_frames = 0
-        self._last_index = max(self._last_index, episode_index)
-        self._write_metadata()
-
-    def record_step(self, step_index: int, observation: Dict[str, object]) -> None:
-        if not self.is_recording or not self._colors_dir:
-            return
-
-        frame_id = f"{step_index:06d}"
-        image_mappings = [
-            ("video.room_view", "_color_0.jpg"),
-            ("video.left_wrist_view", "_color_1.jpg"),
-            ("video.right_wrist_view", "_color_2.jpg"),
-        ]
-
-        saved_any = False
-        for key, suffix in image_mappings:
-            value = observation.get(key)
-            if value is None:
-                continue
-            array = self._tensor_to_numpy(value)
-            if array is None:
-                continue
-
-            if array.ndim == 3 and array.shape[0] in (1, 3) and array.shape[-1] != 3:
-                # channel-first -> channel-last
-                array = np.transpose(array, (1, 2, 0))
-
-            if array.ndim != 3 or array.shape[-1] != 3:
-                continue
-
-            if array.dtype != np.uint8:
-                array = np.clip(array, 0, 255).astype(np.uint8)
-            else:
-                array = np.ascontiguousarray(array)
-
-            file_path = self._colors_dir / f"{frame_id}{suffix}"
-            if not cv2.imwrite(str(file_path), array):
-                logger_mp.warning(f"Failed to write frame {file_path}")
-                continue
-            saved_any = True
-
-        if saved_any:
-            self._num_frames += 1
-
-    def finish_episode(self, status: str, total_steps: int) -> None:
-        if not self.is_recording:
-            return
-        if self._metadata is not None:
-            self._metadata.update(
-                {
-                    "finished_at": datetime.now().isoformat(),
-                    "status": status,
-                    "num_steps": total_steps,
-                    "num_frames": self._num_frames,
-                }
-            )
-            self._write_metadata()
-        self._episode_dir = None
-        self._colors_dir = None
-        self._meta_path = None
-        self._metadata = None
-        self._num_frames = 0
-
-
-class AsyncEpisodeImageRecorder(EpisodeImageRecorder):
-    def __init__(self, base_dir: Path):
-        super().__init__(base_dir)
-        self.queue = queue.Queue()
-        self.saving_thread = threading.Thread(target=self._save_worker, daemon=True)
-        self.saving_thread.start()
-
-    def _save_worker(self):
-        while True:
-            item = self.queue.get()
-            if item is None:
-                break
-
-            # Unpack and save
-            step_index, observation = item
-            super().record_step(step_index, observation)
-            self.queue.task_done()
-
-    def record_step_async(self, step_index: int, observation: Dict[str, object]):
-        # We must COPY the observation/images because they might be overwritten
-        # in shared memory before the thread saves them.
-        obs_copy = {}
-        for k, v in observation.items():
-            if "video" in k and v is not None:
-                # Ensure we copy the tensor/numpy array to own the memory
-                obs_copy[k] = v.clone() if isinstance(v, torch.Tensor) else v.copy()
-
-        self.queue.put((step_index, obs_copy))
-
-    def stop(self):
-        self.queue.put(None)
-        self.saving_thread.join()
-
-    def finish_episode(self, status: str, total_steps: int) -> None:
-        # Wait for all pending saves to complete so num_frames is accurate
-        self.queue.join()
-        super().finish_episode(status, total_steps)
 
 
 def eval_policy(
@@ -286,7 +119,7 @@ def eval_policy(
         robot_interface["arm_ctrl"].ctrl_dual_arm(init_arm_pose, tau)
         time.sleep(1.0)  # Give time for the robot to move
 
-        episode_recorder: Optional[AsyncEpisodeImageRecorder] = None
+        episode_recorder: Optional[EpisodeWriter] = None
         if getattr(cfg, "record_data", False):
             if getattr(cfg, "record_dir", ""):
                 record_dir = Path(cfg.record_dir).expanduser()
@@ -295,14 +128,20 @@ def eval_policy(
                 record_dir = base_root / "recordings"
             record_dir = record_dir.resolve()
             logger_mp.info(f"Recording enabled. Saving episodes to {record_dir}.")
-            episode_recorder = AsyncEpisodeImageRecorder(record_dir)
-            if episode_recorder.last_index > 0:
-                logger_mp.info(
-                    f"Detected existing recordings up to episode_{episode_recorder.last_index:04d}; continuing numbering."
-                )
+            
+            # Initialize EpisodeWriter
+            episode_recorder = EpisodeWriter(
+                task_dir=str(record_dir),
+                task_goal="evaluation",
+                frequency=cfg.frequency,
+                image_size=[tv_img_shape[1], tv_img_shape[0]], # width, height
+                rerun_log=False
+            )
 
         quit_program = False
-        episode_counter = episode_recorder.last_index if episode_recorder else 0
+        # Note: EpisodeWriter manages episode IDs internally based on directory content
+        episode_counter = episode_recorder.episode_id if episode_recorder else 0
+        
         while not quit_program:
             user_input = input("Press 's' to start evaluation, 'r' to reset to initial pose, or 'q' to quit: ")
             user_input = user_input.strip().lower()
@@ -356,15 +195,10 @@ def eval_policy(
                 task_name = step.get("task", "")
 
             if episode_recorder:
-                metadata = {
-                    "task": task_name,
-                    "dataset_episode_index": int(cfg.episodes),
-                    "dataset_from_index": int(from_idx),
-                    "model_path": cfg.model_path,
-                    "repo_id": cfg.repo_id,
-                    "frequency": cfg.frequency,
-                }
-                episode_recorder.start_episode(episode_counter, metadata)
+                if task_name:
+                    episode_recorder.text['goal'] = task_name
+                episode_recorder.create_episode()
+                episode_recorder.set_label("unspecified")
 
             try:
                 while True:
@@ -387,6 +221,7 @@ def eval_policy(
                     loop_start_time = time.perf_counter()
 
                     # 1. Get Observations
+                    # This updates current_arm_q from robot
                     observation, current_arm_q = process_images_and_observations_gr00t(
                         tv_img_array, wrist_img_array, arm_ctrl
                     )
@@ -415,15 +250,101 @@ def eval_policy(
                     for action_np in actions:
                         loop_start_time = time.perf_counter()
 
-                        # CRITICAL FIX: Update observation inside the loop for recording
-                        # We need to capture what the robot actually sees NOW, not what it saw at the start of the chunk.
-                        # Note: 'process_images_and_observations_gr00t' effectively takes a snapshot.
-                        current_obs, _ = process_images_and_observations_gr00t(
-                            tv_img_array, wrist_img_array, arm_ctrl
-                        )
-
-                        if episode_recorder and episode_recorder.is_recording:
-                            episode_recorder.record_step_async(idx, current_obs)
+                        # CRITICAL: Capture images and state for recording NOW
+                        current_tv_image = tv_img_array.copy()
+                        current_wrist_image = wrist_img_array.copy()
+                        
+                        # Note: 'process_images_and_observations_gr00t' updates current_arm_q, so we should get fresh reading if we want exact sync with image
+                        # But action execution loop might be faster than image update (30Hz vs control freq).
+                        # process_images_and_observations_gr00t also does a sleep if called in loop? No, it just reads.
+                        
+                        if episode_recorder and episode_recorder.is_ready():
+                            # Get current states
+                            # Re-read arm state to be precise or use the one from start of loop?
+                            # Teleop script reads arm state inside the loop.
+                            current_lr_arm_q_rec = arm_ctrl.get_current_dual_arm_q()
+                            
+                            left_ee_state_rec = np.array([])
+                            right_ee_state_rec = np.array([])
+                            if cfg.ee:
+                                with ee_shared_mem["lock"]:
+                                    full_state_rec = np.array(ee_shared_mem["state"][:])
+                                    left_ee_state_rec = full_state_rec[:ee_dof]
+                                    right_ee_state_rec = full_state_rec[ee_dof:]
+                                    
+                            # Prepare data for EpisodeWriter
+                            colors = {}
+                            colors["color_0"] = current_tv_image
+                            colors["color_1"] = current_wrist_image[:, :wrist_img_shape[1]//2]
+                            colors["color_2"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            
+                            depths = {}
+                            
+                            states = {
+                                "left_arm": {
+                                    "qpos": current_lr_arm_q_rec[:7].tolist(),
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "right_arm": {
+                                    "qpos": current_lr_arm_q_rec[7:].tolist(),
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "left_ee": {
+                                    "qpos": left_ee_state_rec.tolist() if len(left_ee_state_rec)>0 else [],
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "right_ee": {
+                                    "qpos": right_ee_state_rec.tolist() if len(right_ee_state_rec)>0 else [],
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "body": {
+                                    "qpos": []
+                                }
+                            }
+                            
+                            # Parse actions
+                            arm_action_rec = action_np[:arm_dof]
+                            left_arm_act = arm_action_rec[:7]
+                            right_arm_act = arm_action_rec[7:]
+                            
+                            left_ee_act = []
+                            right_ee_act = []
+                            if cfg.ee:
+                                ee_action_start_idx = arm_dof
+                                left_ee_act = action_np[ee_action_start_idx : ee_action_start_idx + ee_dof]
+                                right_ee_act = action_np[ee_action_start_idx + ee_dof : ee_action_start_idx + 2 * ee_dof]
+                            
+                            actions_rec = {
+                                "left_arm": {
+                                    "qpos": left_arm_act.tolist(),
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "right_arm": {
+                                    "qpos": right_arm_act.tolist(),
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "left_ee": {
+                                    "qpos": left_ee_act.tolist() if len(left_ee_act)>0 else [],
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "right_ee": {
+                                    "qpos": right_ee_act.tolist() if len(right_ee_act)>0 else [],
+                                    "qvel": [],
+                                    "torque": []
+                                },
+                                "body": {
+                                    "qpos": []
+                                }
+                            }
+                            
+                            episode_recorder.add_item(colors=colors, depths=depths, states=states, actions=actions_rec)
 
                         arm_action = action_np[:arm_dof]
                         tau = arm_ik.solve_tau(arm_action)
@@ -451,8 +372,8 @@ def eval_policy(
                 logger_mp.exception("Error during evaluation loop.")
                 raise
             finally:
-                if episode_recorder and episode_recorder.is_recording:
-                    episode_recorder.finish_episode(episode_stop_reason, idx)
+                if episode_recorder:
+                    episode_recorder.save_episode()
 
             if quit_program:
                 break
@@ -484,6 +405,9 @@ def eval_policy(
         if 'sim_state_subscriber' in locals() and sim_state_subscriber:
             sim_state_subscriber.stop_subscribe()
             logger_mp.info("SimStateSubscriber cleaned up")
+        
+        if episode_recorder:
+            episode_recorder.close()
 
 
 @parser.wrap()
@@ -519,3 +443,4 @@ def eval_main(cfg: EvalRealConfig):
 if __name__ == "__main__":
     init_logging()
     eval_main()
+
