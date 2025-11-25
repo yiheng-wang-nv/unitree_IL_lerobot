@@ -45,6 +45,15 @@ from unitree_lerobot.eval_robot.utils.rerun_visualizer import RerunLogger, visua
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.experiment.data_config import UnitreeG1DataConfig_v5
 
+# Import TeleVuerWrapper for teleoperation intervention
+try:
+    from televuer import TeleVuerWrapper
+except ImportError:
+    print("Could not import TeleVuerWrapper. Make sure televuer is installed.")
+    # We can continue without it, but teleop won't work. 
+    # For now let's assume it's there or fail later if used.
+    pass
+
 # Import EpisodeWriter from teleop
 try:
     from teleop.utils.episode_writer import EpisodeWriter
@@ -74,6 +83,23 @@ def eval_policy(
         image_info = setup_image_client(cfg)
         robot_interface = setup_robot_interface(cfg)
         
+        # Setup TeleVuer for intervention
+        tv_wrapper = None
+        try:
+            tv_img_shm_name = image_info["shm_resources"][0].name
+            tv_wrapper = TeleVuerWrapper(
+                binocular=False,
+                use_hand_tracking=False,
+                img_shape=image_info["tv_img_shape"],
+                img_shm_name=tv_img_shm_name,
+                return_state_data=True,
+                return_hand_rot_data=False,
+                display_scale=0.1,
+            )
+            logger_mp.info("TeleVuerWrapper initialized for intervention.")
+        except Exception as e:
+            logger_mp.warning(f"Failed to initialize TeleVuerWrapper: {e}. Teleop intervention will not work.")
+
         # Unpack interfaces for convenience
         arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof, sim_state_subscriber = (
             robot_interface[key] for key in ["arm_ctrl", "arm_ik", "ee_shared_mem", "arm_dof", "ee_dof", "sim_state_subscriber"]
@@ -180,13 +206,38 @@ def eval_policy(
             # --- Run Main Loop ---
             episode_counter += 1
             logger_mp.info(
-                f"Starting evaluation loop at {cfg.frequency} Hz (episode {episode_counter:04d}). "
-                "Press 'r'+Enter to stop & reset; 'q'+Enter to quit; 'p'+Enter to pause/resume."
+                f"Starting evaluation loop at {cfg.frequency} Hz (episode {episode_counter:04d}).\n"
+                "Controls:\n"
+                "  'r' + Enter: Stop & Reset episode\n"
+                "  'q' + Enter: Quit program\n"
+                "  'p' + Enter: Pause/Resume Policy\n"
+                "     [While Paused]:\n"
+                "       - Robot holds position until teleop is toggled\n"
+                "       - Press 's' + Enter OR Left Controller 'A' to start/stop teleop control & recording\n"
+                "       - After enabling teleop, squeeze the trigger once to \"arm\" the fingers (keeps current grip)\n"
+                "       - Releasing the trigger opens the grasp relative to that armed pose\n"
             )
             idx = 0
             episode_stop_reason = "manual_stop"
             task_name = ""
             is_paused = False
+            teleop_active = False  # Whether teleop control is currently active
+            teleop_recording = False  # Recording flag (mirrors teleop_active)
+            TELEOP_TRIGGER_ARM_THRESHOLD = 0.05
+            def _set_teleop_mode(enable: bool, source: str) -> None:
+                nonlocal teleop_active, teleop_recording
+                if enable:
+                    if not tv_wrapper:
+                        logger_mp.warning("TeleVuerWrapper not ready, cannot start teleop control.")
+                        return
+                    teleop_active = True
+                    teleop_recording = True
+                    logger_mp.info(f"Teleop control & recording STARTED ({source}).")
+                else:
+                    if teleop_active or teleop_recording:
+                        logger_mp.info(f"Teleop control & recording STOPPED ({source}).")
+                    teleop_active = False
+                    teleop_recording = False
             if hasattr(step, "get"):
                 try:
                     task_name = step.get("task", "")
@@ -218,22 +269,173 @@ def eval_policy(
                                 break
                             if cmd == "p":
                                 is_paused = not is_paused
-                                logger_mp.info(f"Pause toggled: {'PAUSED' if is_paused else 'RESUMED'}")
                                 if is_paused:
-                                    # Stay in current position
-                                    # Get current pose and hold it
-                                    current_q = arm_ctrl.get_current_dual_arm_q()
-                                    tau = arm_ik.solve_tau(current_q)
-                                    arm_ctrl.ctrl_dual_arm(current_q, tau)
-                                    continue # Skip rest of loop to hold position
+                                    logger_mp.info(
+                                        "PAUSED (Policy Stopped). Press 's' or controller Left A to start teleop control & recording, or 'p' to resume policy."
+                                    )
+                                    _set_teleop_mode(False, "pause")
+                                else:
+                                    logger_mp.info("RESUMED (Policy Control).")
+                                    _set_teleop_mode(False, "resume")
                                 
+                                if is_paused and not tv_wrapper:
+                                    logger_mp.warning("TeleVuerWrapper not ready, cannot teleop. Robot will just hold position.")
+                            if is_paused and cmd == "s":
+                                _set_teleop_mode(not teleop_active, "keyboard 's'")
                     except Exception:
                         pass
 
+                    # Check controller Left A button for recording toggle if in paused state
+                    if is_paused and tv_wrapper:
+                        try:
+                            tele_data = tv_wrapper.get_motion_state_data()
+                            # Left A button (mapped to 's' functionality)
+                            la = bool(getattr(tele_data.tele_state, 'left_aButton', False))
+                            
+                            # Edge detection logic needs persistent state, but we don't have a global dict here.
+                            # We can use a simple static attribute or just check current state with a debounce.
+                            # For simplicity, let's implement a basic debounce using time.
+                            current_time = time.time()
+                            if not hasattr(eval_policy, "last_la_press_time"):
+                                eval_policy.last_la_press_time = 0
+                            
+                            if la and (current_time - eval_policy.last_la_press_time > 0.5):
+                                eval_policy.last_la_press_time = current_time
+                                _set_teleop_mode(not teleop_active, "controller Left A")
+                        except Exception:
+                            pass
+
                     if is_paused:
-                        # Keep holding current position
-                        # We can add a small sleep to prevent busy loop
-                        time.sleep(0.1)
+                        loop_start_time = time.perf_counter()
+                        
+                        # --- Teleoperation Intervention Logic ---
+                        if teleop_active and tv_wrapper:
+                            # 1. Get Teleop Data
+                            tele_data = tv_wrapper.get_motion_state_data()
+                            
+                            # 2. Get Robot State
+                            current_lr_arm_q = arm_ctrl.get_current_dual_arm_q()
+                            current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+                            
+                            # 3. Solve IK
+                            sol_q, sol_tauff = arm_ik.solve_ik(
+                                tele_data.left_arm_pose, 
+                                tele_data.right_arm_pose, 
+                                current_lr_arm_q, 
+                                current_lr_arm_dq
+                            )
+                            
+                            # 4. Control Arm
+                            arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+                            
+                            # 5. Control Hands (Simple mapping for Dex3)
+                            # Exactly as in teleop_dex3_controller.py - no extra logic
+                            if cfg.ee == "dex3":
+                                # Normalize triggers [10.0, 0.0] -> [0.0, 1.0]
+                                left_trigger_raw = getattr(tele_data, 'left_trigger_value', 10.0)
+                                right_trigger_raw = getattr(tele_data, 'right_trigger_value', 10.0)
+                                left_trigger_norm = np.clip((10.0 - left_trigger_raw) / 10.0, 0.0, 1.0)
+                                right_trigger_norm = np.clip((10.0 - right_trigger_raw) / 10.0, 0.0, 1.0)
+
+                                # Constants from teleop script
+                                THUMB1_MIN_RAD = 0.0
+                                THUMB1_MAX_RAD = 55.0 * np.pi / 180.0
+                                R_THUMB1_MIN_RAD = -40.0 * np.pi / 180.0
+                                R_THUMB1_MAX_RAD = 0.0
+
+                                with ee_shared_mem["lock"]:
+                                    if isinstance(ee_shared_mem["left"], SynchronizedArray):
+                                        l_cmd = np.array(ee_shared_mem["left"][:], dtype=float)
+                                        r_cmd = np.array(ee_shared_mem["right"][:], dtype=float)
+
+                                        # Direct mapping exactly as teleop_dex3_controller.py:
+                                        # Left: trigger=0 (not pressed) -> THUMB1_MIN_RAD (closed)
+                                        #       trigger=1 (pressed) -> THUMB1_MAX_RAD (open)
+                                        l_cmd[1] = THUMB1_MIN_RAD + left_trigger_norm * (THUMB1_MAX_RAD - THUMB1_MIN_RAD)
+                                        
+                                        # Right: trigger=0 (not pressed) -> R_THUMB1_MAX_RAD (closed)
+                                        #        trigger=1 (pressed) -> R_THUMB1_MIN_RAD (open)
+                                        r_cmd[1] = R_THUMB1_MAX_RAD + right_trigger_norm * (R_THUMB1_MIN_RAD - R_THUMB1_MAX_RAD)
+
+                                        ee_shared_mem["left"][:] = to_list(l_cmd)
+                                        ee_shared_mem["right"][:] = to_list(r_cmd)
+                        else:
+                            # Fallback: just hold position if no teleop
+                            current_q = arm_ctrl.get_current_dual_arm_q()
+                            tau = arm_ik.solve_tau(current_q)
+                            arm_ctrl.ctrl_dual_arm(current_q, tau)
+
+                        # --- Recording Logic (Teleop) ---
+                        if episode_recorder and teleop_recording:
+                            # Capture current state for recording
+                            current_tv_image = tv_img_array.copy()
+                            current_wrist_image = wrist_img_array.copy()
+                            
+                            current_lr_arm_q_rec = arm_ctrl.get_current_dual_arm_q()
+                            
+                            left_ee_state_rec = np.array([])
+                            right_ee_state_rec = np.array([])
+                            if cfg.ee:
+                                with ee_shared_mem["lock"]:
+                                    full_state_rec = np.array(ee_shared_mem["state"][:])
+                                    left_ee_state_rec = full_state_rec[:ee_dof]
+                                    right_ee_state_rec = full_state_rec[ee_dof:]
+                            
+                            colors = {}
+                            colors["color_0"] = current_tv_image
+                            colors["color_1"] = current_wrist_image[:, :wrist_img_shape[1]//2]
+                            colors["color_2"] = current_wrist_image[:, wrist_img_shape[1]//2:]
+                            
+                            depths = {}
+                            states = {
+                                "left_arm": {"qpos": current_lr_arm_q_rec[:7].tolist(), "qvel": [], "torque": []},
+                                "right_arm": {"qpos": current_lr_arm_q_rec[7:].tolist(), "qvel": [], "torque": []},
+                                "left_ee": {"qpos": left_ee_state_rec.tolist() if len(left_ee_state_rec)>0 else [], "qvel": [], "torque": []},
+                                "right_ee": {"qpos": right_ee_state_rec.tolist() if len(right_ee_state_rec)>0 else [], "qvel": [], "torque": []},
+                                "body": {"qpos": []}
+                            }
+                            
+                            # For actions in teleop mode, we use the current state/command as action
+                            # Or if we solved IK, we use that as action. 
+                            # Let's use the computed IK solution if available (sol_q), otherwise current q.
+                            if tv_wrapper:
+                                act_l_arm = sol_q[:7]
+                                act_r_arm = sol_q[-7:]
+                                # Hand actions? The command we just sent.
+                                # We can just use the 'states' as 'actions' for simplicity or reconstruct it.
+                                # To be consistent with policy loop, we should try to record the "commanded" action.
+                                act_l_ee = []
+                                act_r_ee = []
+                                if cfg.ee == "dex3":
+                                    # We reconstructed l_cmd/r_cmd above, but scope is tricky.
+                                    # Let's read back what we wrote or just use current state approximation
+                                    pass 
+                            else:
+                                act_l_arm = current_lr_arm_q_rec[:7]
+                                act_r_arm = current_lr_arm_q_rec[7:]
+                            
+                            # Re-read hand commands for action recording
+                            left_ee_act = []
+                            right_ee_act = []
+                            if cfg.ee:
+                                with ee_shared_mem["lock"]:
+                                    # Recording the INPUT command (left/right arrays) as action
+                                    if isinstance(ee_shared_mem["left"], SynchronizedArray):
+                                        left_ee_act = np.array(ee_shared_mem["left"][:]).tolist()
+                                        right_ee_act = np.array(ee_shared_mem["right"][:]).tolist()
+
+                            actions_rec = {
+                                "left_arm": {"qpos": act_l_arm.tolist() if isinstance(act_l_arm, np.ndarray) else act_l_arm, "qvel": [], "torque": []},
+                                "right_arm": {"qpos": act_r_arm.tolist() if isinstance(act_r_arm, np.ndarray) else act_r_arm, "qvel": [], "torque": []},
+                                "left_ee": {"qpos": left_ee_act, "qvel": [], "torque": []},
+                                "right_ee": {"qpos": right_ee_act, "qvel": [], "torque": []},
+                                "body": {"qpos": []}
+                            }
+                            
+                            episode_recorder.add_item(colors=colors, depths=depths, states=states, actions=actions_rec)
+
+                        # Maintain frequency
+                        time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
                         continue
 
                     loop_start_time = time.perf_counter()

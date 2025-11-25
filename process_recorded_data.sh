@@ -22,3 +22,10 @@ python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
     --raw-dir "${SOURCE_DIR}/${TASK_NAME}" \
     --repo-id i4h/${TASK_NAME} \
     --robot_type Unitree_G1_Dex3
+
+
+# example
+cd /home/nvidia/workspace/yiheng/unitree_IL_lerobot
+python unitree_lerobot/utils/convert_unitree_json_to_lerobot.py \
+--raw-dir ~/workspace/yiheng/xr_teleoperate/teleop/utils/data/install_trocar_from_tray_realsense_intervention_data/interve_data \
+--repo-id i4h/interve_data --robot_type Unitree_G1_Dex3

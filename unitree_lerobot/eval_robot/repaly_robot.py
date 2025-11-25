@@ -111,7 +111,7 @@ def replay_main(cfg: EvalRealConfig):
             # Maintain frequency
             time.sleep(max(0, (1.0 / cfg.frequency) - (time.perf_counter() - loop_start_time)))
 
-    time.sleep(100)
+    time.sleep(3)
     cleanup_resources(image_info)
 
 
