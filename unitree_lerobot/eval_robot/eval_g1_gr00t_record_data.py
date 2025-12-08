@@ -19,6 +19,7 @@ from typing import Dict, Optional
 
 import cv2
 import numpy as np
+import pinocchio as pin
 from pprint import pformat
 from dataclasses import asdict
 
@@ -67,6 +68,94 @@ logging_mp.basic_config(level=logging_mp.INFO)
 logger_mp = logging_mp.get_logger(__name__)
 
 
+class RelativeControlHelper:
+    """
+    Helper class for relative control mode.
+    Records reference poses at takeover and computes relative transforms.
+    
+    Robot at position A, VR controller at position B.
+    At takeover: record A and B as reference.
+    When VR moves to C:
+      delta = C @ inv(B)        # Compute VR's relative transform
+      target = delta @ A        # Apply to robot's reference pose
+    """
+    def __init__(self, arm_ik):
+        self.arm_ik = arm_ik
+        self.ref_vr_left_pose = None   # VR left wrist pose at takeover (B_left)
+        self.ref_vr_right_pose = None  # VR right wrist pose at takeover (B_right)
+        self.ref_robot_left_ee = None  # Robot left EE pose at takeover (A_left)
+        self.ref_robot_right_ee = None # Robot right EE pose at takeover (A_right)
+        self.is_active = False
+        
+    def compute_robot_ee_poses(self, joint_q: np.ndarray):
+        """
+        Compute robot end-effector poses from joint angles using FK.
+        Returns (left_ee_pose, right_ee_pose) as 4x4 homogeneous matrices.
+        """
+        robot = self.arm_ik.reduced_robot
+        model = robot.model
+        data = robot.data
+        
+        # Forward kinematics
+        pin.forwardKinematics(model, data, joint_q)
+        pin.updateFramePlacements(model, data)
+        
+        # Get EE frame placements
+        left_ee_id = model.getFrameId("L_ee")
+        right_ee_id = model.getFrameId("R_ee")
+        
+        left_ee_pose = data.oMf[left_ee_id].homogeneous.copy()
+        right_ee_pose = data.oMf[right_ee_id].homogeneous.copy()
+        
+        return left_ee_pose, right_ee_pose
+    
+    def start_takeover(self, current_joint_q: np.ndarray, vr_left_pose: np.ndarray, vr_right_pose: np.ndarray):
+        """
+        Start relative control mode.
+        Records current robot EE poses and VR poses as reference.
+        """
+        # Record robot's current EE poses (A)
+        self.ref_robot_left_ee, self.ref_robot_right_ee = self.compute_robot_ee_poses(current_joint_q)
+        
+        # Record VR poses at takeover moment (B)
+        self.ref_vr_left_pose = vr_left_pose.copy()
+        self.ref_vr_right_pose = vr_right_pose.copy()
+        
+        self.is_active = True
+        logger_mp.info("Relative control mode activated. Reference poses recorded.")
+        
+    def stop_takeover(self):
+        """Stop relative control mode."""
+        self.is_active = False
+        self.ref_vr_left_pose = None
+        self.ref_vr_right_pose = None
+        self.ref_robot_left_ee = None
+        self.ref_robot_right_ee = None
+        logger_mp.info("Relative control mode deactivated.")
+        
+    def compute_target_poses(self, current_vr_left: np.ndarray, current_vr_right: np.ndarray):
+        """
+        Compute target robot EE poses using relative transform.
+        
+        target = delta @ ref_robot
+        where delta = current_vr @ inv(ref_vr)
+        
+        This means: robot moves by the same relative transform as VR.
+        """
+        if not self.is_active:
+            return current_vr_left, current_vr_right
+            
+        # Compute relative transforms: delta = C @ inv(B)
+        delta_left = current_vr_left @ np.linalg.inv(self.ref_vr_left_pose)
+        delta_right = current_vr_right @ np.linalg.inv(self.ref_vr_right_pose)
+        
+        # Apply to robot reference poses: target = delta @ A
+        target_left = delta_left @ self.ref_robot_left_ee
+        target_right = delta_right @ self.ref_robot_right_ee
+        
+        return target_left, target_right
+
+
 def eval_policy(
     policy,
     cfg: EvalRealConfig,
@@ -100,10 +189,16 @@ def eval_policy(
         except Exception as e:
             logger_mp.warning(f"Failed to initialize TeleVuerWrapper: {e}. Teleop intervention will not work.")
 
+        # Initialize RelativeControlHelper (will be set after arm_ik is available)
+        relative_ctrl = None
+
         # Unpack interfaces for convenience
         arm_ctrl, arm_ik, ee_shared_mem, arm_dof, ee_dof, sim_state_subscriber = (
             robot_interface[key] for key in ["arm_ctrl", "arm_ik", "ee_shared_mem", "arm_dof", "ee_dof", "sim_state_subscriber"]
         )
+        
+        # Initialize RelativeControlHelper for relative displacement control
+        relative_ctrl = RelativeControlHelper(arm_ik)
         tv_img_array, wrist_img_array, tv_img_shape, wrist_img_shape, is_binocular, has_wrist_cam = (
             image_info[key]
             for key in [
@@ -214,8 +309,9 @@ def eval_policy(
                 "     [While Paused]:\n"
                 "       - Robot holds position until teleop is toggled\n"
                 "       - Press 's' + Enter OR Left Controller 'A' to start/stop teleop control & recording\n"
-                "       - After enabling teleop, squeeze the trigger once to \"arm\" the fingers (keeps current grip)\n"
-                "       - Releasing the trigger opens the grasp relative to that armed pose\n"
+                "       - Uses RELATIVE control: robot moves by the same delta as VR controller\n"
+                "         (no jump when starting teleop!)\n"
+                "       - Trigger controls finger grip\n"
             )
             idx = 0
             episode_stop_reason = "manual_stop"
@@ -230,12 +326,21 @@ def eval_policy(
                     if not tv_wrapper:
                         logger_mp.warning("TeleVuerWrapper not ready, cannot start teleop control.")
                         return
+                    # Start relative control: record reference poses
+                    current_joint_q = arm_ctrl.get_current_dual_arm_q()
+                    tele_data = tv_wrapper.get_motion_state_data()
+                    relative_ctrl.start_takeover(
+                        current_joint_q,
+                        tele_data.left_arm_pose,
+                        tele_data.right_arm_pose
+                    )
                     teleop_active = True
                     teleop_recording = True
-                    logger_mp.info(f"Teleop control & recording STARTED ({source}).")
+                    logger_mp.info(f"Teleop control & recording STARTED with RELATIVE control ({source}).")
                 else:
                     if teleop_active or teleop_recording:
                         logger_mp.info(f"Teleop control & recording STOPPED ({source}).")
+                    relative_ctrl.stop_takeover()
                     teleop_active = False
                     teleop_recording = False
             if hasattr(step, "get"):
@@ -308,7 +413,7 @@ def eval_policy(
                     if is_paused:
                         loop_start_time = time.perf_counter()
                         
-                        # --- Teleoperation Intervention Logic ---
+                        # --- Teleoperation Intervention Logic (with Relative Control) ---
                         if teleop_active and tv_wrapper:
                             # 1. Get Teleop Data
                             tele_data = tv_wrapper.get_motion_state_data()
@@ -317,10 +422,17 @@ def eval_policy(
                             current_lr_arm_q = arm_ctrl.get_current_dual_arm_q()
                             current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
                             
-                            # 3. Solve IK
+                            # 3. Compute target poses using RELATIVE control
+                            # This avoids the jump when starting teleop
+                            target_left_ee, target_right_ee = relative_ctrl.compute_target_poses(
+                                tele_data.left_arm_pose,
+                                tele_data.right_arm_pose
+                            )
+                            
+                            # 4. Solve IK for the relative target poses
                             sol_q, sol_tauff = arm_ik.solve_ik(
-                                tele_data.left_arm_pose, 
-                                tele_data.right_arm_pose, 
+                                target_left_ee, 
+                                target_right_ee, 
                                 current_lr_arm_q, 
                                 current_lr_arm_dq
                             )
