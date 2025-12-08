@@ -13,14 +13,24 @@ except ImportError:
     print("Error: scikit-learn is required. Please install it via 'pip install scikit-learn'.")
     exit(1)
 
-def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_ratio):
+def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_ratio, 
+                         success_folder, failure_folder, intervention_folder):
     """
     Generates a CSV index for RECAP Value Function Training.
     
-    Key Changes for Pi* / RECAP Reproduction:
-    1. Unified Regression: Failure episodes now have a dynamic value slope, shifted down by 'penalty_gap'.
-       Value_Fail(t) = Value_Success_Equivalent(t) - Penalty
-    2. Data Cleaning: Automatically drops the first N% of failure episodes to remove ambiguity.
+    Key Features:
+    1. Unified Regression Target: 
+       - Success/Intervention: Linear ramp from -1.0 to 0.0.
+       - Failure: Linear ramp shifted down by 'penalty_gap' (e.g., -2.5 to -1.5).
+    2. Data Cleaning: 
+       - Automatically drops the first N% of failure episodes to remove perceptual aliasing (ambiguous start states).
+    3. Optional Intervention:
+       - Can optionally include 'intervention' data treated as high-value success samples.
+    
+    Args:
+        success_folder: Folder name for success episodes (None to skip)
+        failure_folder: Folder name for failure episodes (None to skip)
+        intervention_folder: Folder name for intervention episodes (None to skip)
     """
     input_path = Path(input_dir)
     
@@ -28,32 +38,50 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
         print(f"Error: Input directory {input_path} does not exist.")
         return
 
-    # Store metadata
+    # Build category mapping: category_type -> folder_name
+    # category_type is used internally for logic (success/failure/intervention)
+    # folder_name is the actual directory name
+    category_folders = {}
+    if success_folder:
+        category_folders["success"] = success_folder
+    if failure_folder:
+        category_folders["failure"] = failure_folder
+    if intervention_folder:
+        category_folders["intervention"] = intervention_folder
+    
+    if not category_folders:
+        print("Error: At least one folder must be specified (--success, --failure, or --intervention)")
+        return
+    
+    categories = list(category_folders.keys())
+    
     episode_metadata = []
-    
-    # Track max length of successful episodes for Normalization
-    max_success_length = 0
-    
-    categories = ["success", "failure"]
+    max_success_length = 0 # Baseline for normalizing time steps
     
     print(f"--- Pass 1: Scanning dataset at {input_path} ---")
+    print(f"Category -> Folder mapping:")
+    for cat, folder in category_folders.items():
+        print(f"  {cat}: {folder}")
     
     # --- PASS 1: Scan directories ---
     for category in categories:
-        category_dir = input_path / category
+        folder_name = category_folders[category]
+        category_dir = input_path / folder_name
         if not category_dir.exists():
-            print(f"Warning: Directory {category_dir} not found. Skipping.")
+            print(f"Warning: Directory {category_dir} not found. Skipping '{category}'.")
             continue
             
+        # List all episode directories
         episode_dirs = sorted([d for d in category_dir.iterdir() if d.is_dir() and d.name.startswith("episode_")])
         
         for ep_dir in tqdm(episode_dirs, desc=f"Scanning {category}"):
             try:
+                # Parse episode ID
                 episode_num = int(ep_dir.name.split('_')[-1])
             except ValueError:
                 continue
             
-            # Find all image files
+            # Find image files
             image_files = [f for f in ep_dir.iterdir() if f.suffix.lower() in ('.jpg', '.png', '.jpeg')]
             
             # Extract unique frame IDs
@@ -72,8 +100,9 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
             sorted_frames = sorted(list(frame_ids))
             current_length = len(sorted_frames)
             
-            # Update statistics (Only use Success to define the 'Standard Clock')
-            if category == "success":
+            # Update Max Length Statistics
+            # Both 'success' and 'intervention' contribute to defining the standard task duration
+            if category in ["success", "intervention"]:
                 if current_length > max_success_length:
                     max_success_length = current_length
             
@@ -84,35 +113,38 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
                 "total_steps": current_length
             })
 
-    # Fallback
+    # Fallback to prevent division by zero
     if max_success_length == 0:
-        print("Warning: No successful episodes found. Defaulting max length to 100.")
+        print("Warning: No successful/intervention episodes found. Defaulting max length to 100.")
         max_success_length = 100
 
-    # Define Global Min/Max for Training Script
-    # Success Range: [-1.0, 0.0]
-    # Failure Range: [-1.0 - penalty, 0.0 - penalty] -> [-2.5, -1.5] (if penalty=1.5)
-    # Theoretical Min: -1.0 - penalty_gap
-    global_min = -1.0 - penalty_gap
-    global_max = 0.0
-
     print(f"\n--- RECAP Value Logic Stats ---")
-    print(f"Max Success Length (T_max): {max_success_length}")
+    print(f"Max Standard Length (T_max): {max_success_length}")
     print(f"Penalty Gap (C_fail): {penalty_gap}")
-    print(f"Truncating First {truncate_ratio*100}% of Failure Episodes")
-    print(f"Expected Global Value Range: [{global_min:.2f}, {global_max:.2f}]")
+    if "failure" in categories:
+        print(f"Truncating First {truncate_ratio*100}% of FAILURE episodes to remove aliasing.")
+    if "intervention" in categories:
+        print(f"Intervention episodes are INCLUDED and treated as SUCCESS (High Value).")
     print(f"-----------------\n")
 
-    # --- Sklearn Stratified Group K-Fold ---
-    print(f"--- Performing Stratified Group K-Fold ({n_folds} folds) ---")
+    # --- Stratified Group K-Fold ---
+    # We use StratifiedGroupKFold to ensure:
+    # 1. Frames from the same episode stay in the same fold (Group constraint).
+    # 2. Each fold has a balanced ratio of success/failure (Stratified constraint).
     
     X_dummy = np.zeros(len(episode_metadata))
-    y = []
+    y = [] # Binary label for stratification
     groups = []
     
     for meta in episode_metadata:
-        label = 1 if meta['category'] == 'success' else 0
+        # y: success/intervention = 1, failure = 0
+        if meta['category'] in ["success", "intervention"]:
+            label = 1
+        else:
+            label = 0
         y.append(label)
+        
+        # Unique Group ID to prevent data leakage
         unique_group_id = f"{meta['category']}_{meta['episode_num']}"
         groups.append(unique_group_id)
 
@@ -125,7 +157,7 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
             key = (meta['category'], meta['episode_num'])
             ep_to_fold_map[key] = fold_id
 
-    # --- PASS 2: Generate CSV with Dynamic RECAP Values ---
+    # --- PASS 2: Generate CSV Records ---
     data_records = {}
     print("--- Pass 2: Generating records ---")
     
@@ -141,52 +173,47 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
         fold_id = ep_to_fold_map.get((category, episode_num), -1)
         if fold_id == -1: continue
         
-        # Determine Start Index (For Data Cleaning)
+        # --- Data Cleaning (Truncation) ---
         start_idx = 0
         if category == "failure" and truncate_ratio > 0:
-            # Drop the first N% of frames for failure episodes to remove aliasing
+            # Drop the first N% of frames for failure episodes.
+            # This removes the "normal-looking" start of failed episodes.
             start_idx = int(total_steps * truncate_ratio)
             dropped_frames += start_idx
         
         for step_idx, frame_num in enumerate(sorted_frames):
             
-            # Skip frames if they are in the "Ambiguous Start" zone of a failure
+            # Skip truncated frames
             if step_idx < start_idx:
                 continue
             
             kept_frames += 1
             key = f"{category}_{episode_num}_{frame_num}"
             
-            # --- CORE RECAP LOGIC ---
-            
-            # 1. Calculate "Time Component" (Progress)
-            # Both Success and Failure calculate "How close to the end?"
-            # Success ends at Goal. Failure ends at Drop/Error.
+            # --- Value Calculation ---
+            # Calculate remaining steps
             steps_remaining = total_steps - step_idx
             
-            # Normalized time: -1.0 (start) to 0.0 (end)
-            # We use max_success_length to standardize the "slope" across all data
+            # Normalized Time: -1.0 (start) -> 0.0 (end)
+            # We use max_success_length to standardize the slope
             time_val = -1.0 * (steps_remaining / max_success_length)
+            time_val = max(-1.0, time_val) # Clamp start value
             
-            # Clamp time component to -1.0 (for very long failure episodes)
-            time_val = max(-1.0, time_val)
-            
-            # 2. Calculate Final Value
-            if category == "success":
-                # Range: [-1.0, 0.0]
+            if category in ["success", "intervention"]:
+                # Success/Intervention Range: [-1.0, 0.0]
                 value = time_val
             else:
-                # Range: [-2.5, -1.5] (if penalty is 1.5)
-                # The slope is the same, but shifted down by penalty
+                # Failure Range: Shifted down by penalty
+                # e.g., if penalty is 1.5, range becomes [-2.5, -1.5]
                 value = time_val - penalty_gap
             
             record = [
-                episode_num,  # Int
-                frame_num,    # Int
-                category,     # String
-                total_steps,  # Int
-                f"{value:.5f}", # Float (formatted string)
-                fold_id       # Int
+                episode_num,  
+                frame_num,    
+                category,     
+                total_steps,  
+                f"{value:.5f}", 
+                fold_id       
             ]
             data_records[key] = record
 
@@ -208,21 +235,60 @@ def create_dataset_index(input_dir, output_csv, penalty_gap, n_folds, truncate_r
     print("Done.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate RECAP index with Dynamic Failure Values.")
-    parser.add_argument("input_dir", type=str, help="Root directory of dataset")
-    parser.add_argument("output_csv", type=str, help="Output CSV path")
+    parser = argparse.ArgumentParser(
+        description="Generate RECAP dataset index with unified value regression.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Standard usage with default folder names
+  python generate_dataset_index.py /path/to/data output.csv --success success --failure failure
+  
+  # Include intervention data
+  python generate_dataset_index.py /path/to/data output.csv --success success --failure failure --intervention intervention
+  
+  # Custom folder names
+  python generate_dataset_index.py /path/to/data output.csv --success good_demos --failure bad_demos
+  
+  # Only success data (no failure)
+  python generate_dataset_index.py /path/to/data output.csv --success success
+        """
+    )
     
-    # This is the "Gap" between success and failure. 
-    # Success range: [-1.0, 0.0]
-    # Failure range starts roughly at: -1.0 - 1.5 = -2.5
-    parser.add_argument("--penalty", type=float, default=1.5, help="Failure penalty gap (C_fail). Default 1.5")
+    parser.add_argument("input_dir", type=str, help="Root directory of the dataset")
+    parser.add_argument("output_csv", type=str, help="Path to save the generated CSV")
     
-    # IMPORTANT: Data Cleaning
-    # Drops the first 30% of failure episodes to prevent confusion
-    parser.add_argument("--truncate_failure", type=float, default=0.0, help="Ratio of start frames to drop in failure episodes (0.0 - 1.0). Default 0.3")
+    # Folder Names (at least one required)
+    folder_group = parser.add_argument_group('Data Folders', 'Specify folder names for each category (at least one required)')
+    folder_group.add_argument("--success", type=str, default=None, metavar="FOLDER",
+                              help="Folder name for SUCCESS episodes (e.g., 'success')")
+    folder_group.add_argument("--failure", type=str, default=None, metavar="FOLDER",
+                              help="Folder name for FAILURE episodes (e.g., 'failure')")
+    folder_group.add_argument("--intervention", type=str, default=None, metavar="FOLDER",
+                              help="Folder name for INTERVENTION episodes (treated as success)")
     
-    parser.add_argument("--n_folds", type=int, default=5, help="Number of folds (default: 5)")
+    # RECAP Logic Parameters
+    parser.add_argument("--penalty", type=float, default=1.5, 
+                        help="Value penalty gap for failure episodes (default: 1.5)")
+    parser.add_argument("--truncate_failure", type=float, default=0.3, 
+                        help="Ratio of start frames to drop in failure episodes (0.0-1.0, default: 0.3)")
+    
+    # Validation Setup
+    parser.add_argument("--n_folds", type=int, default=5, 
+                        help="Number of folds for Cross-Validation (default: 5)")
     
     args = parser.parse_args()
     
-    create_dataset_index(args.input_dir, args.output_csv, args.penalty, args.n_folds, args.truncate_failure)
+    # Validate at least one folder is specified
+    if not any([args.success, args.failure, args.intervention]):
+        parser.error("At least one folder must be specified: --success, --failure, or --intervention")
+    
+    create_dataset_index(
+        args.input_dir, 
+        args.output_csv, 
+        args.penalty, 
+        args.n_folds, 
+        args.truncate_failure,
+        args.success,
+        args.failure,
+        args.intervention
+    )

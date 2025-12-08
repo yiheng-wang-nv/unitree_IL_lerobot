@@ -198,7 +198,7 @@ def main():
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight-decay', type=float, default=0.01)
-    parser.add_argument('--workers', type=int, default=16)
+    parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--output', default='./output', type=str)
     
     args = parser.parse_args()
