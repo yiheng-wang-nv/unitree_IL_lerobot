@@ -379,12 +379,13 @@ def eval_policy(
                                         "PAUSED (Policy Stopped). Press 's' or controller Left A to start teleop control & recording, or 'p' to resume policy."
                                     )
                                     _set_teleop_mode(False, "pause")
+                                    if tv_wrapper:
+                                        logger_mp.info("TeleVuerWrapper is ready. Controller buttons should work.")
+                                    else:
+                                        logger_mp.warning("TeleVuerWrapper not ready, cannot teleop. Robot will just hold position.")
                                 else:
                                     logger_mp.info("RESUMED (Policy Control).")
                                     _set_teleop_mode(False, "resume")
-                                
-                                if is_paused and not tv_wrapper:
-                                    logger_mp.warning("TeleVuerWrapper not ready, cannot teleop. Robot will just hold position.")
                             if is_paused and cmd == "s":
                                 _set_teleop_mode(not teleop_active, "keyboard 's'")
                     except Exception:
@@ -397,18 +398,21 @@ def eval_policy(
                             # Left A button (mapped to 's' functionality)
                             la = bool(getattr(tele_data.tele_state, 'left_aButton', False))
                             
-                            # Edge detection logic needs persistent state, but we don't have a global dict here.
-                            # We can use a simple static attribute or just check current state with a debounce.
-                            # For simplicity, let's implement a basic debounce using time.
+                            # Edge detection with debounce
                             current_time = time.time()
                             if not hasattr(eval_policy, "last_la_press_time"):
                                 eval_policy.last_la_press_time = 0
+                            if not hasattr(eval_policy, "prev_la"):
+                                eval_policy.prev_la = False
                             
-                            if la and (current_time - eval_policy.last_la_press_time > 0.5):
-                                eval_policy.last_la_press_time = current_time
+                            # Rising edge detection: button was not pressed, now is pressed
+                            if la and not eval_policy.prev_la:
+                                logger_mp.info(f"Controller Left A button pressed! teleop_active={teleop_active}")
                                 _set_teleop_mode(not teleop_active, "controller Left A")
-                        except Exception:
-                            pass
+                            
+                            eval_policy.prev_la = la
+                        except Exception as e:
+                            logger_mp.warning(f"Controller button check failed: {e}")
 
                     if is_paused:
                         loop_start_time = time.perf_counter()
