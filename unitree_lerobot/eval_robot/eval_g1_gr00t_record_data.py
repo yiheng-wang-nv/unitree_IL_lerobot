@@ -213,9 +213,9 @@ def eval_policy(
                 "  'p' + Enter: Pause/Resume Policy\n"
                 "     [While Paused]:\n"
                 "       - Robot holds position until teleop is toggled\n"
-                "       - Press 's' + Enter OR Left Controller 'A' to start/stop teleop control & recording\n"
-                "       - After enabling teleop, squeeze the trigger once to \"arm\" the fingers (keeps current grip)\n"
-                "       - Releasing the trigger opens the grasp relative to that armed pose\n"
+                "       - Press Left Controller 'A' to start/stop teleop control & recording\n"
+                "       - RELATIVE CONTROL: Robot will NOT jump to your hand position!\n"
+                "         Your hand's movement is applied as relative offset from robot's current pose.\n"
             )
             idx = 0
             episode_stop_reason = "manual_stop"
@@ -223,13 +223,63 @@ def eval_policy(
             is_paused = False
             teleop_active = False  # Whether teleop control is currently active
             teleop_recording = False  # Recording flag (mirrors teleop_active)
-            TELEOP_TRIGGER_ARM_THRESHOLD = 0.05
+            
+            # Relative control state for teleop intervention
+            teleop_human_init_left_pose = None   # Human hand initial pose (4x4) when teleop starts
+            teleop_human_init_right_pose = None
+            teleop_robot_init_left_pose = None   # Robot EE initial pose (4x4) when teleop starts  
+            teleop_robot_init_right_pose = None
+            
+            def _get_robot_ee_poses(joint_q):
+                """Get current end-effector poses using forward kinematics from arm_ik's pinocchio model."""
+                import pinocchio as pin
+                # Use arm_ik's reduced_robot model for FK
+                model = arm_ik.reduced_robot.model
+                data = arm_ik.reduced_robot.data
+                
+                # Need to create fresh data for FK computation
+                data_fk = model.createData()
+                pin.forwardKinematics(model, data_fk, joint_q)
+                pin.updateFramePlacements(model, data_fk)
+                
+                # Try to get frame IDs - use the same IDs that arm_ik uses
+                L_hand_id = arm_ik.L_hand_id
+                R_hand_id = arm_ik.R_hand_id
+                
+                left_pose = data_fk.oMf[L_hand_id].homogeneous.copy()
+                right_pose = data_fk.oMf[R_hand_id].homogeneous.copy()
+                return left_pose, right_pose
+            
             def _set_teleop_mode(enable: bool, source: str) -> None:
                 nonlocal teleop_active, teleop_recording
+                nonlocal teleop_human_init_left_pose, teleop_human_init_right_pose
+                nonlocal teleop_robot_init_left_pose, teleop_robot_init_right_pose
                 if enable:
                     if not tv_wrapper:
                         logger_mp.warning("TeleVuerWrapper not ready, cannot start teleop control.")
                         return
+                    
+                    # Capture initial poses for relative control
+                    try:
+                        tele_data = tv_wrapper.get_motion_state_data()
+                        if tele_data is not None and tele_data.left_arm_pose is not None:
+                            teleop_human_init_left_pose = np.array(tele_data.left_arm_pose).copy()
+                            teleop_human_init_right_pose = np.array(tele_data.right_arm_pose).copy()
+                            
+                            # Get current robot arm EE pose using forward kinematics
+                            current_q = arm_ctrl.get_current_dual_arm_q()
+                            teleop_robot_init_left_pose, teleop_robot_init_right_pose = _get_robot_ee_poses(current_q)
+                            
+                            logger_mp.info(f"Teleop relative control initialized. Human/Robot initial poses captured.")
+                        else:
+                            logger_mp.warning("Could not capture initial poses, teleop data not ready.")
+                            return
+                    except Exception as e:
+                        logger_mp.warning(f"Failed to capture initial poses: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return
+                    
                     teleop_active = True
                     teleop_recording = True
                     logger_mp.info(f"Teleop control & recording STARTED ({source}).")
@@ -238,6 +288,11 @@ def eval_policy(
                         logger_mp.info(f"Teleop control & recording STOPPED ({source}).")
                     teleop_active = False
                     teleop_recording = False
+                    # Clear initial poses
+                    teleop_human_init_left_pose = None
+                    teleop_human_init_right_pose = None
+                    teleop_robot_init_left_pose = None
+                    teleop_robot_init_right_pose = None
             if hasattr(step, "get"):
                 try:
                     task_name = step.get("task", "")
@@ -271,7 +326,7 @@ def eval_policy(
                                 is_paused = not is_paused
                                 if is_paused:
                                     logger_mp.info(
-                                        "PAUSED (Policy Stopped). Press 's' or controller Left A to start teleop control & recording, or 'p' to resume policy."
+                                        "PAUSED (Policy Stopped). Press controller Left A to start teleop control & recording, or 'p' to resume policy."
                                     )
                                     _set_teleop_mode(False, "pause")
                                 else:
@@ -280,8 +335,6 @@ def eval_policy(
                                 
                                 if is_paused and not tv_wrapper:
                                     logger_mp.warning("TeleVuerWrapper not ready, cannot teleop. Robot will just hold position.")
-                            if is_paused and cmd == "s":
-                                _set_teleop_mode(not teleop_active, "keyboard 's'")
                     except Exception:
                         pass
 
@@ -308,25 +361,53 @@ def eval_policy(
                     if is_paused:
                         loop_start_time = time.perf_counter()
                         
-                        # --- Teleoperation Intervention Logic ---
+                        # --- Teleoperation Intervention Logic (Relative Control) ---
                         if teleop_active and tv_wrapper:
                             # 1. Get Teleop Data
                             tele_data = tv_wrapper.get_motion_state_data()
                             
-                            # 2. Get Robot State
-                            current_lr_arm_q = arm_ctrl.get_current_dual_arm_q()
-                            current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
-                            
-                            # 3. Solve IK
-                            sol_q, sol_tauff = arm_ik.solve_ik(
-                                tele_data.left_arm_pose, 
-                                tele_data.right_arm_pose, 
-                                current_lr_arm_q, 
-                                current_lr_arm_dq
-                            )
-                            
-                            # 4. Control Arm
-                            arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
+                            if tele_data is None or tele_data.left_arm_pose is None:
+                                # No valid data, just hold position
+                                current_q = arm_ctrl.get_current_dual_arm_q()
+                                tau = arm_ik.solve_tau(current_q)
+                                arm_ctrl.ctrl_dual_arm(current_q, tau)
+                            elif teleop_human_init_left_pose is None:
+                                # Initial poses not captured, just hold position
+                                current_q = arm_ctrl.get_current_dual_arm_q()
+                                tau = arm_ik.solve_tau(current_q)
+                                arm_ctrl.ctrl_dual_arm(current_q, tau)
+                            else:
+                                # 2. Get current human poses (4x4 transformation matrices)
+                                current_human_left = np.array(tele_data.left_arm_pose)
+                                current_human_right = np.array(tele_data.right_arm_pose)
+                                
+                                # 3. Calculate relative transformation: delta = current @ inverse(init)
+                                # This captures how much the human hand has moved/rotated relative to start
+                                human_init_left_inv = np.linalg.inv(teleop_human_init_left_pose)
+                                human_init_right_inv = np.linalg.inv(teleop_human_init_right_pose)
+                                
+                                delta_left = current_human_left @ human_init_left_inv
+                                delta_right = current_human_right @ human_init_right_inv
+                                
+                                # 4. Apply relative transformation to robot's initial pose
+                                # Target = delta @ robot_init (apply human's relative motion to robot's starting pose)
+                                target_left_pose = delta_left @ teleop_robot_init_left_pose
+                                target_right_pose = delta_right @ teleop_robot_init_right_pose
+                                
+                                # 5. Get Robot State
+                                current_lr_arm_q = arm_ctrl.get_current_dual_arm_q()
+                                current_lr_arm_dq = arm_ctrl.get_current_dual_arm_dq()
+                                
+                                # 6. Solve IK with relative target poses
+                                sol_q, sol_tauff = arm_ik.solve_ik(
+                                    target_left_pose, 
+                                    target_right_pose, 
+                                    current_lr_arm_q, 
+                                    current_lr_arm_dq
+                                )
+                                
+                                # 7. Control Arm
+                                arm_ctrl.ctrl_dual_arm(sol_q, sol_tauff)
                             
                             # 5. Control Hands (Simple mapping for Dex3)
                             # Exactly as in teleop_dex3_controller.py - no extra logic
