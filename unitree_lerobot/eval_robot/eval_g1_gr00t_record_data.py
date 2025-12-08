@@ -172,22 +172,9 @@ def eval_policy(
         image_info = setup_image_client(cfg)
         robot_interface = setup_robot_interface(cfg)
         
-        # Setup TeleVuer for intervention
+        # TeleVuerWrapper will be lazily initialized when needed (during pause/teleop)
         tv_wrapper = None
-        try:
-            tv_img_shm_name = image_info["shm_resources"][0].name
-            tv_wrapper = TeleVuerWrapper(
-                binocular=False,
-                use_hand_tracking=False,
-                img_shape=image_info["tv_img_shape"],
-                img_shm_name=tv_img_shm_name,
-                return_state_data=True,
-                return_hand_rot_data=False,
-                display_scale=0.1,
-            )
-            logger_mp.info("TeleVuerWrapper initialized for intervention.")
-        except Exception as e:
-            logger_mp.warning(f"Failed to initialize TeleVuerWrapper: {e}. Teleop intervention will not work.")
+        tv_img_shm_name = image_info["shm_resources"][0].name
 
         # Initialize RelativeControlHelper (will be set after arm_ik is available)
         relative_ctrl = None
@@ -379,10 +366,23 @@ def eval_policy(
                                         "PAUSED (Policy Stopped). Press 's' or controller Left A to start teleop control & recording, or 'p' to resume policy."
                                     )
                                     _set_teleop_mode(False, "pause")
-                                    if tv_wrapper:
-                                        logger_mp.info("TeleVuerWrapper is ready. Controller buttons should work.")
+                                    # Lazy initialization of TeleVuerWrapper when first pausing
+                                    if tv_wrapper is None:
+                                        try:
+                                            tv_wrapper = TeleVuerWrapper(
+                                                binocular=False,
+                                                use_hand_tracking=False,
+                                                img_shape=tv_img_shape,
+                                                img_shm_name=tv_img_shm_name,
+                                                return_state_data=True,
+                                                return_hand_rot_data=False,
+                                                display_scale=0.1,
+                                            )
+                                            logger_mp.info("TeleVuerWrapper initialized. Controller buttons should work.")
+                                        except Exception as e:
+                                            logger_mp.warning(f"Failed to initialize TeleVuerWrapper: {e}. Teleop will not work.")
                                     else:
-                                        logger_mp.warning("TeleVuerWrapper not ready, cannot teleop. Robot will just hold position.")
+                                        logger_mp.info("TeleVuerWrapper is ready. Controller buttons should work.")
                                 else:
                                     logger_mp.info("RESUMED (Policy Control).")
                                     _set_teleop_mode(False, "resume")
