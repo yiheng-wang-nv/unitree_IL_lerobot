@@ -143,6 +143,9 @@ class G1_29_ArmController:
             self.msg.motor_cmd[id].q = self.all_motor_q[id]
         logger_mp.info("Lock OK!\n")
 
+        # Set initial arm target to current position to prevent jump to zeros
+        self.q_target = self.get_current_dual_arm_q()
+
         # initialize publish thread
         self.publish_thread = threading.Thread(target=self._ctrl_motor_state)
         self.ctrl_lock = threading.Lock()

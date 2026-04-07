@@ -241,22 +241,22 @@ def process_images_and_observations(
 def process_images_and_observations_gr00t(
     tv_img_array, wrist_img_array, arm_ctrl
 ):
-    """Processes images and generates observations."""
+    """Processes images and generates observations for GR00T 1.6.
+
+    Returns observation with video in nested dict format: (B, T, H, W, C) numpy uint8.
+    """
     current_tv_image = tv_img_array.copy()
     current_wrist_image = wrist_img_array.copy() if wrist_img_array is not None else None
 
-    # v4
-    # observation = {
-    #     "video.head_view": torch.from_numpy(current_tv_image),
-    #     "video.rm_view": torch.from_numpy(current_wrist_image),
-    # }
-    # v5
     left_wrist_cam = current_wrist_image[:, : wrist_img_array.shape[1] // 2]
     right_wrist_cam = current_wrist_image[:, wrist_img_array.shape[1] // 2 :]
+
     observation = {
-        "video.left_wrist_view": torch.from_numpy(left_wrist_cam),
-        "video.right_wrist_view": torch.from_numpy(right_wrist_cam),
-        "video.room_view": torch.from_numpy(current_tv_image),
+        "video": {
+            "left_wrist_view": left_wrist_cam[np.newaxis, np.newaxis, ...].astype(np.uint8),
+            "right_wrist_view": right_wrist_cam[np.newaxis, np.newaxis, ...].astype(np.uint8),
+            "room_view": current_tv_image[np.newaxis, np.newaxis, ...].astype(np.uint8),
+        },
     }
     current_arm_q = arm_ctrl.get_current_dual_arm_q()
 

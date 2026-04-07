@@ -113,6 +113,8 @@ class EvalRealConfig:
     episodes: int = 0
     frequency: float = 30.0
     model_path: str = ""
+    modality_config_path: str = ""
+    safe_trajectory_path: str = ""
     record_data: bool = False
     record_dir: str = ""
 
